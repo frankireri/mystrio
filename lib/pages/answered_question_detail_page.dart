@@ -7,6 +7,7 @@ import 'package:mystrio/widgets/question_card.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:mystrio/models/question.dart'; // Import the Question model
 
 class AnsweredQuestionDetailPage extends StatefulWidget {
   final Question question;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mystrio/question_provider.dart';
+import 'package:mystrio/models/question.dart'; // Import the Question model
 
 class AnswerPage extends StatefulWidget {
   final Question question;

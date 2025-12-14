@@ -1,27 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
-
-// Mock User class for our in-memory "database"
-class MockUser {
-  final String email;
-  final String password;
-  final String userId; // The device-based ID linked to this permanent account
-  String username; // The chosen username
-  String? chosenQuestionText; // New: User's chosen default question
-  String? chosenQuestionStyleId; // New: User's chosen style for the question card
-  String? profileImagePath; // New: User's chosen profile image path
-
-  MockUser({
-    required this.email,
-    required this.password,
-    required this.userId,
-    required this.username,
-    this.chosenQuestionText,
-    this.chosenQuestionStyleId,
-    this.profileImagePath,
-  });
-}
+import 'package:mystrio/api/mystrio_api.dart'; // Import the new API client
 
 class AuthService with ChangeNotifier {
   static const _userIdKey = 'userId';
@@ -30,7 +10,8 @@ class AuthService with ChangeNotifier {
   static const _loggedInEmailKey = 'loggedInEmail';
   static const _chosenQuestionTextKey = 'chosenQuestionText';
   static const _chosenQuestionStyleIdKey = 'chosenQuestionStyleId';
-  static const _profileImagePathKey = 'profileImagePath'; // New key
+  static const _profileImagePathKey = 'profileImagePath';
+  static const _authTokenKey = 'authToken'; // Key for storing auth token
 
   String? _currentDeviceUserId;
   String? _currentDeviceUsername;
@@ -38,11 +19,11 @@ class AuthService with ChangeNotifier {
   String? _loggedInEmail;
   String? _chosenQuestionText;
   String? _chosenQuestionStyleId;
-  String? _profileImagePath; // New property
+  String? _profileImagePath;
+  String? _authToken; // Store authentication token
   bool _isLoading = true;
 
-  // Our in-memory "database" of mock users
-  final List<MockUser> _mockUsers = [];
+  final MystrioApi _api = MystrioApi(); // Instantiate the API client
 
   String? get userId => _currentDeviceUserId;
   String? get username => _currentDeviceUsername;
@@ -50,7 +31,8 @@ class AuthService with ChangeNotifier {
   String? get loggedInEmail => _loggedInEmail;
   String? get chosenQuestionText => _chosenQuestionText;
   String? get chosenQuestionStyleId => _chosenQuestionStyleId;
-  String? get profileImagePath => _profileImagePath; // New getter
+  String? get profileImagePath => _profileImagePath;
+  String? get authToken => _authToken; // Getter for auth token
   bool get isLoading => _isLoading;
 
   AuthService() {
@@ -68,17 +50,26 @@ class AuthService with ChangeNotifier {
     _loggedInEmail = prefs.getString(_loggedInEmailKey);
     _chosenQuestionText = prefs.getString(_chosenQuestionTextKey);
     _chosenQuestionStyleId = prefs.getString(_chosenQuestionStyleIdKey);
-    _profileImagePath = prefs.getString(_profileImagePathKey); // Load profile image path
+    _profileImagePath = prefs.getString(_profileImagePathKey);
+    _authToken = prefs.getString(_authTokenKey); // Load auth token
 
     if (_currentDeviceUserId == null) {
       _currentDeviceUserId = const Uuid().v4();
       await prefs.setString(_userIdKey, _currentDeviceUserId!);
     }
 
-    if (_loggedInEmail != null) {
+    // If an auth token exists, we can assume a permanent account is logged in
+    if (_authToken != null && _loggedInEmail != null) {
       _hasPermanentAccount = true;
-      // In a real app, you'd fetch user data from backend using _loggedInEmail
-      // and update other properties from there.
+      // In a real app, you'd validate the token with the backend
+      // and fetch full user data here if needed.
+    } else {
+      _hasPermanentAccount = false;
+      _loggedInEmail = null;
+      _authToken = null;
+      await prefs.remove(_hasPermanentAccountKey);
+      await prefs.remove(_loggedInEmailKey);
+      await prefs.remove(_authTokenKey);
     }
 
     _isLoading = false;
@@ -89,7 +80,8 @@ class AuthService with ChangeNotifier {
     _currentDeviceUsername = newUsername;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_usernameKey, newUsername);
-    notifyListeners();
+    // Removed notifyListeners() here to prevent double popup
+    // TODO: Consider updating username on backend if user is logged in
   }
 
   Future<void> setChosenQuestion(String questionText, String styleId) async {
@@ -98,6 +90,18 @@ class AuthService with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_chosenQuestionTextKey, questionText);
     await prefs.setString(_chosenQuestionStyleIdKey, styleId);
+
+    if (_hasPermanentAccount && _currentDeviceUserId != null && _authToken != null) {
+      final response = await _api.updateUserProfile(
+        userId: int.parse(_currentDeviceUserId!), // Assuming userId is int on backend
+        authToken: _authToken!,
+        chosenQuestionText: questionText,
+        chosenQuestionStyleId: styleId,
+      );
+      if (!response['success']) {
+        print('Error updating chosen question on backend: ${response['message']}');
+      }
+    }
     notifyListeners();
   }
 
@@ -109,87 +113,115 @@ class AuthService with ChangeNotifier {
     } else {
       await prefs.remove(_profileImagePathKey);
     }
+
+    if (_hasPermanentAccount && _currentDeviceUserId != null && _authToken != null) {
+      final response = await _api.updateUserProfile(
+        userId: int.parse(_currentDeviceUserId!), // Assuming userId is int on backend
+        authToken: _authToken!,
+        profileImagePath: path,
+      );
+      if (!response['success']) {
+        print('Error updating profile image path on backend: ${response['message']}');
+      }
+    }
     notifyListeners();
   }
 
   Future<String?> signUpWithEmail(String email, String password) async {
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (_mockUsers.any((user) => user.email == email)) {
-      return 'Email already in use.';
-    }
-
     if (_currentDeviceUserId == null || _currentDeviceUsername == null) {
       return 'Device user ID or username not set.';
     }
 
-    final newUser = MockUser(
+    final response = await _api.register(
       email: email,
       password: password,
-      userId: _currentDeviceUserId!,
       username: _currentDeviceUsername!,
       chosenQuestionText: _chosenQuestionText,
       chosenQuestionStyleId: _chosenQuestionStyleId,
       profileImagePath: _profileImagePath,
     );
-    _mockUsers.add(newUser);
 
-    _hasPermanentAccount = true;
-    _loggedInEmail = email;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_hasPermanentAccountKey, true);
-    await prefs.setString(_loggedInEmailKey, email);
+    print('API Register Response: $response'); // Debugging print
 
-    print('Signed up: ${newUser.email} with device ID: ${newUser.userId}');
-    notifyListeners();
-    return null;
-  }
+    if (response['success']) {
+      _hasPermanentAccount = true;
+      _loggedInEmail = email;
+      _authToken = response['data']['token']; // Access token from 'data'
+      
+      // Update local state and SharedPreferences with data from API response
+      final userData = response['data']['user']; // Access user from 'data' and 'user'
+      
+      // Check if userData is null before accessing its properties
+      if (userData == null) {
+        print('Error: User data is null in API response during signup.');
+        return 'Failed to retrieve user data from server.';
+      }
 
-  Future<String?> loginWithEmail(String email, String password) async {
-    await Future.delayed(const Duration(seconds: 1));
-
-    final user = _mockUsers.firstWhereOrNull(
-      (user) => user.email == email && user.password == password,
-    );
-
-    if (user == null) {
-      return 'Invalid email or password.';
-    }
-
-    if (_currentDeviceUserId != user.userId) {
-      _currentDeviceUserId = user.userId;
-      _currentDeviceUsername = user.username;
-      _chosenQuestionText = user.chosenQuestionText;
-      _chosenQuestionStyleId = user.chosenQuestionStyleId;
-      _profileImagePath = user.profileImagePath; // Load profile image path
+      _currentDeviceUserId = userData['id'].toString(); // Ensure it's a string
+      _currentDeviceUsername = userData['username'];
+      _chosenQuestionText = userData['chosenQuestionText'];
+      _chosenQuestionStyleId = userData['chosenQuestionStyleId'];
+      _profileImagePath = userData['profileImagePath'];
 
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_hasPermanentAccountKey, true);
+      await prefs.setString(_loggedInEmailKey, email);
+      await prefs.setString(_authTokenKey, _authToken!);
       await prefs.setString(_userIdKey, _currentDeviceUserId!);
       await prefs.setString(_usernameKey, _currentDeviceUsername!);
       if (_chosenQuestionText != null) await prefs.setString(_chosenQuestionTextKey, _chosenQuestionText!);
       if (_chosenQuestionStyleId != null) await prefs.setString(_chosenQuestionStyleIdKey, _chosenQuestionStyleId!);
       if (_profileImagePath != null) await prefs.setString(_profileImagePathKey, _profileImagePath!);
+
+      print('Signed up: $email');
+      notifyListeners();
+      return null; // Success
     } else {
-      _currentDeviceUsername = user.username;
-      _chosenQuestionText = user.chosenQuestionText;
-      _chosenQuestionStyleId = user.chosenQuestionStyleId;
-      _profileImagePath = user.profileImagePath; // Load profile image path
+      return response['message']; // Return error message from API
+    }
+  }
+
+  Future<String?> loginWithEmail(String email, String password) async {
+    final response = await _api.login(email: email, password: password);
+
+    print('API Login Response: $response'); // Debugging print
+
+    if (response['success']) {
+      _hasPermanentAccount = true;
+      _loggedInEmail = email;
+      _authToken = response['data']['token']; // Access token from 'data'
+      
+      // Update local state and SharedPreferences with data from API response
+      final userData = response['data']['user']; // Access user from 'data' and 'user'
+
+      // Check if userData is null before accessing its properties
+      if (userData == null) {
+        print('Error: User data is null in API response during login.');
+        return 'Failed to retrieve user data from server.';
+      }
+
+      _currentDeviceUserId = userData['id'].toString(); // Ensure it's a string
+      _currentDeviceUsername = userData['username'];
+      _chosenQuestionText = userData['chosenQuestionText'];
+      _chosenQuestionStyleId = userData['chosenQuestionStyleId'];
+      _profileImagePath = userData['profileImagePath'];
+
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_hasPermanentAccountKey, true);
+      await prefs.setString(_loggedInEmailKey, email);
+      await prefs.setString(_authTokenKey, _authToken!);
+      await prefs.setString(_userIdKey, _currentDeviceUserId!);
       await prefs.setString(_usernameKey, _currentDeviceUsername!);
       if (_chosenQuestionText != null) await prefs.setString(_chosenQuestionTextKey, _chosenQuestionText!);
       if (_chosenQuestionStyleId != null) await prefs.setString(_chosenQuestionStyleIdKey, _chosenQuestionStyleId!);
       if (_profileImagePath != null) await prefs.setString(_profileImagePathKey, _profileImagePath!);
+
+      print('Logged in: $email');
+      notifyListeners();
+      return null; // Success
+    } else {
+      return response['message']; // Return error message from API
     }
-
-    _hasPermanentAccount = true;
-    _loggedInEmail = email;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_hasPermanentAccountKey, true);
-    await prefs.setString(_loggedInEmailKey, email);
-
-    print('Logged in: ${user.email}');
-    notifyListeners();
-    return null;
   }
 
   Future<void> logout() async {
@@ -197,27 +229,20 @@ class AuthService with ChangeNotifier {
     _loggedInEmail = null;
     _chosenQuestionText = null;
     _chosenQuestionStyleId = null;
-    _profileImagePath = null; // Clear profile image on logout
+    _profileImagePath = null;
+    _authToken = null; // Clear auth token on logout
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_hasPermanentAccountKey);
     await prefs.remove(_loggedInEmailKey);
     await prefs.remove(_chosenQuestionTextKey);
     await prefs.remove(_chosenQuestionStyleIdKey);
     await prefs.remove(_profileImagePathKey);
+    await prefs.remove(_authTokenKey); // Remove auth token from storage
+
     print('Logged out.');
     notifyListeners();
   }
 
   bool get hasAccount => _currentDeviceUsername != null;
-}
-
-extension ListExtension<T> on List<T> {
-  T? firstWhereOrNull(bool Function(T element) test) {
-    for (var element in this) {
-      if (test(element)) {
-        return element;
-      }
-    }
-    return null;
-  }
 }

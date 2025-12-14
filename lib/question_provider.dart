@@ -1,23 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:mystrio/api/mock_api.dart';
+import 'package:mystrio/api/mystrio_api.dart'; // Import the new API client
 import 'package:mystrio/auth_service.dart';
-
-class Question {
-  final String questionText;
-  String? answerText;
-  final bool isFromAI;
-  final Map<String, String> hints; // Add hints property
-
-  Question({
-    required this.questionText,
-    this.answerText,
-    this.isFromAI = false,
-    this.hints = const {}, // Default to an empty map
-  });
-}
+import 'package:mystrio/models/question.dart'; // Import the new Question model
 
 class QuestionProvider with ChangeNotifier {
-  final MockApi _api = MockApi();
+  final MystrioApi _api = MystrioApi(); // Use the new API client
   late AuthService _authService;
 
   List<Question> _questions = [];
@@ -27,37 +14,8 @@ class QuestionProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
 
   QuestionProvider() {
-    // Add some mock answered questions for testing
-    _questions.add(Question(
-      questionText: 'What\'s your favorite book and why?',
-      answerText: 'My favorite book is "To Kill a Mockingbird" because it beautifully explores themes of justice, prejudice, and compassion through the eyes of a child.',
-      isFromAI: false,
-      hints: {'device': 'Android', 'time': 'Evening', 'location': 'Home', 'mood': 'Thoughtful'},
-    ));
-    _questions.add(Question(
-      questionText: 'If you could travel anywhere, where would you go?',
-      answerText: 'I would love to visit Japan to experience its rich culture, beautiful landscapes, and incredible food. Especially during cherry blossom season!',
-      isFromAI: false,
-      hints: {'device': 'iOS', 'time': 'Afternoon', 'location': 'Cafe', 'mood': 'Excited'},
-    ));
-    _questions.add(Question(
-      questionText: 'What\'s a skill you\'d like to learn?',
-      answerText: 'I\'ve always wanted to learn how to play the piano. The idea of creating music with my own hands is very appealing.',
-      isFromAI: false,
-      hints: {'device': 'Web', 'time': 'Morning', 'location': 'Office', 'mood': 'Inspired'},
-    ));
-    _questions.add(Question(
-      questionText: 'What\'s your biggest dream?',
-      answerText: 'My biggest dream is to build a successful app that genuinely helps people connect and express themselves creatively.',
-      isFromAI: false,
-      hints: {'device': 'Android', 'time': 'Night', 'location': 'Bed', 'mood': 'Hopeful'},
-    ));
-    _questions.add(Question(
-      questionText: 'What makes you truly happy?',
-      answerText: 'Spending quality time with loved ones, exploring new places, and learning new things are what truly make me happy.',
-      isFromAI: false,
-      hints: {'device': 'iOS', 'time': 'Weekend', 'location': 'Outdoors', 'mood': 'Joyful'},
-    ));
+    // Removed mock answered questions from constructor.
+    // These will now be fetched from the API.
   }
 
   void setAuthService(AuthService authService) {
@@ -65,30 +23,69 @@ class QuestionProvider with ChangeNotifier {
   }
 
   Future<void> fetchQuestions() async {
-    if (_authService.userId == null) return;
+    if (_authService.userId == null || _authService.authToken == null) {
+      _questions = []; // Clear questions if not authenticated
+      notifyListeners();
+      return;
+    }
     _isLoading = true;
     notifyListeners();
-    // In a real app, you'd fetch questions from a backend here.
-    // For now, we'll just use the mock data.
-    // _questions = await _api.getQuestions(_authService.userId!);
+
+    final response = await _api.getQuestions(
+      authToken: _authService.authToken!,
+    );
+
+    if (response['success']) {
+      _questions = (response['data'] as List)
+          .map((json) => Question.fromJson(json))
+          .toList();
+    } else {
+      print('Error fetching questions: ${response['message']}');
+      _questions = []; // Clear questions on error
+    }
+
     _isLoading = false;
     notifyListeners();
   }
 
-  Future<void> addQuestion(String question) async {
-    if (_authService.userId == null) return;
-    await _api.postQuestion(_authService.userId!, question);
-    _questions.add(Question(questionText: question));
-    notifyListeners();
+  Future<void> addQuestion(String questionText) async {
+    if (_authService.userId == null || _authService.authToken == null) return;
+
+    // For now, hints and isFromAI are hardcoded or derived.
+    // In a real scenario, these might come from user input or backend logic.
+    final response = await _api.postQuestion(
+      questionText: questionText,
+      isFromAI: false, // Assuming user-added questions are not AI
+      hints: {}, // No hints for user-added questions initially
+      authToken: _authService.authToken!,
+    );
+
+    if (response['success']) {
+      // Assuming the API returns the newly created question with an ID
+      _questions.add(Question.fromJson(response['data']));
+      notifyListeners();
+    } else {
+      print('Error adding question: ${response['message']}');
+    }
   }
 
-  Future<void> addAnswer(Question question, String answer) async {
-    if (_authService.userId == null) return;
-    await _api.postAnswer(_authService.userId!, question, answer);
-    final index = _questions.indexOf(question);
-    if (index != -1) {
-      _questions[index].answerText = answer;
-      notifyListeners();
+  Future<void> addAnswer(Question question, String answerText) async {
+    if (_authService.authToken == null) return;
+
+    final response = await _api.postAnswer(
+      questionId: question.id, // Use the question's ID
+      answerText: answerText,
+      authToken: _authService.authToken!,
+    );
+
+    if (response['success']) {
+      final index = _questions.indexWhere((q) => q.id == question.id);
+      if (index != -1) {
+        _questions[index].answerText = answerText;
+        notifyListeners();
+      }
+    } else {
+      print('Error adding answer: ${response['message']}');
     }
   }
 }

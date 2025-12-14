@@ -3,9 +3,41 @@ import 'package:provider/provider.dart';
 import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/services/theme_service.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
+import 'package:mystrio/pages/login_page.dart'; // Import LoginPage
+import 'package:mystrio/pages/initial_page.dart'; // Import InitialPage for logout navigation
 
 class OwnerProfilePage extends StatelessWidget {
   const OwnerProfilePage({super.key});
+
+  void _showSignInDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Unlock More Features!'),
+          content: const Text(
+              'Sign in or create an account to save your progress, customize your profile, and access all features.'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Later'),
+              onPressed: () {
+                Navigator.of(context).pop(); // Dismiss dialog
+              },
+            ),
+            ElevatedButton(
+              child: const Text('Sign In / Sign Up'),
+              onPressed: () {
+                Navigator.of(context).pop(); // Dismiss dialog
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,25 +117,28 @@ class OwnerProfilePage extends StatelessWidget {
             Card(
               child: Column(
                 children: [
-                  ListTile(
-                    leading: Icon(Icons.logout, color: theme.colorScheme.error),
-                    title: Text('Logout', style: TextStyle(color: theme.colorScheme.error)),
-                    onTap: () async {
-                      await authService.logout();
-                      if (context.mounted) {
-                        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-                      }
-                    },
-                  ),
-                  ListTile(
-                    leading: Icon(Icons.delete_forever, color: theme.colorScheme.error),
-                    title: Text('Delete Account', style: TextStyle(color: theme.colorScheme.error)),
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Account deletion functionality coming soon!')),
-                      );
-                    },
-                  ),
+                  if (!authService.hasPermanentAccount)
+                    ListTile(
+                      leading: Icon(Icons.login, color: theme.colorScheme.primary),
+                      title: Text('Sign In / Sign Up', style: TextStyle(color: theme.colorScheme.primary)),
+                      onTap: () => _showSignInDialog(context),
+                    ),
+                  if (authService.hasPermanentAccount)
+                    ListTile(
+                      leading: Icon(Icons.logout, color: theme.colorScheme.error),
+                      title: Text('Logout', style: TextStyle(color: theme.colorScheme.error)),
+                      onTap: () async {
+                        await authService.logout();
+                        if (context.mounted) {
+                          // Navigate to InitialPage and remove all other routes
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (context) => const InitialPage()),
+                            (route) => false,
+                          );
+                        }
+                      },
+                    ),
+                  // The "Delete Account" ListTile has been removed
                 ],
               ),
             ),

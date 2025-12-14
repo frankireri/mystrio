@@ -62,6 +62,7 @@ class _QuizPageState extends State<QuizPage> {
         // Add entry to the specific quiz's leaderboard
         Provider.of<QuizProvider>(context, listen: false).addLeaderboardEntryToCurrentQuiz(
           LeaderboardEntry(username: 'Player', score: _score), // 'Player' can be replaced with actual user if logged in
+          widget.username, // Pass the quiz owner's username
         );
       });
     }

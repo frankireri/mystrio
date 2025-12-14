@@ -7,6 +7,7 @@ import 'package:mystrio/widgets/custom_app_bar.dart';
 import 'package:mystrio/widgets/empty_state_widget.dart';
 import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/services/question_style_service.dart'; // Import the service
+import 'package:mystrio/models/question.dart'; // Import the Question model
 import 'dart:math';
 
 class ProfilePage extends StatefulWidget {

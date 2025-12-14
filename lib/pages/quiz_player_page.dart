@@ -5,6 +5,7 @@ import 'package:mystrio/widgets/custom_app_bar.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mystrio/pages/leaderboard_page.dart';
 import 'package:mystrio/pages/quiz_welcome_page.dart';
+import 'package:mystrio/auth_service.dart'; // Import AuthService
 
 class QuizPlayerPage extends StatefulWidget {
   final String quizId;
@@ -72,8 +73,12 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
     } else {
       setState(() {
         _quizCompleted = true;
+        final authService = Provider.of<AuthService>(context, listen: false);
+        final quizOwnerUsername = authService.username ?? 'Unknown'; // Get the current user's username
+
         Provider.of<QuizProvider>(context, listen: false).addLeaderboardEntryToCurrentQuiz(
           LeaderboardEntry(username: _playerName ?? 'Anonymous', score: _score),
+          quizOwnerUsername, // Pass the quiz owner's username
         );
         Navigator.pushReplacement(
           context,

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:mystrio/question_provider.dart';
 import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/services/question_style_service.dart';
+import 'package:mystrio/models/question.dart'; // Import the Question model
 
 class ShareableStoryCard extends StatelessWidget {
   final Question question;

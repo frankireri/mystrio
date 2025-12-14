@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:mystrio/quiz_provider.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
 import 'package:share_plus/share_plus.dart'; // Import share_plus
+import 'package:mystrio/pages/main_tab_page.dart'; // Import MainTabPage
 
 class QuizResultsPage extends StatelessWidget {
   final String quizId;
@@ -131,6 +132,24 @@ class QuizResultsPage extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+          ),
+          const SizedBox(height: 30), // Spacing below social sharing
+          ElevatedButton.icon(
+            onPressed: () {
+              // Navigate back to the MainTabPage and remove all other routes
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const MainTabPage()),
+                (route) => false,
+              );
+            },
+            icon: const Icon(Icons.home),
+            label: const Text('Back to Home'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: theme.colorScheme.primary,
+              foregroundColor: theme.colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              textStyle: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
         ],

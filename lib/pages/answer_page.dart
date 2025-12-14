@@ -9,6 +9,7 @@ import 'package:confetti/confetti.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart' as rendering;
+import 'package:mystrio/models/question.dart'; // Import the Question model
 
 class AnswerPage extends StatefulWidget {
   final Question question;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
+import 'package:mystrio/pages/main_tab_page.dart'; // Import MainTabPage
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -35,9 +36,11 @@ class _SignUpPageState extends State<SignUpPage> {
       });
 
       if (error == null) {
-        // Successfully signed up, navigate to home
-        Navigator.of(context)
-            .pushNamedAndRemoveUntil('/home-dashboard', (route) => false); // Navigate to dashboard
+        // Successfully signed up, navigate to MainTabPage
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const MainTabPage()),
+          (route) => false,
+        );
       }
     }
   }

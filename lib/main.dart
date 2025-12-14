@@ -18,7 +18,7 @@ import 'package:mystrio/pages/create_quiz_page.dart';
 import 'package:mystrio/pages/quiz_page.dart';
 import 'package:mystrio/pages/game_selection_page.dart';
 import 'package:mystrio/gratitude_provider.dart';
-import 'package:mystrio/pages/gratitude_page.dart';
+// import 'package:mystrio/pages/gratitude_page.dart'; // Removed direct import
 import 'package:mystrio/pages/main_tab_page.dart';
 import 'package:mystrio/services/gratitude_theme_service.dart';
 import 'package:mystrio/services/theme_service.dart';
@@ -31,6 +31,39 @@ import 'package:mystrio/services/user_question_service.dart';
 import 'package:mystrio/pages/my_cards_page.dart';
 import 'package:mystrio/pages/shared_question_landing_page.dart'; // Import the new landing page
 
+// Placeholder for Coming Soon feature
+class ComingSoonPage extends StatelessWidget {
+  final String featureName;
+  const ComingSoonPage({super.key, required this.featureName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(featureName)),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.construction, size: 80, color: Colors.grey),
+            const SizedBox(height: 20),
+            Text(
+              '$featureName Coming Soon!',
+              style: Theme.of(context).textTheme.headlineSmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'We\'re working hard to bring you this exciting feature.',
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 void main() {
   Provider.debugCheckInvalidValueType = null; // Temporarily disable Provider type checking
   runApp(
@@ -39,7 +72,7 @@ void main() {
         ChangeNotifierProvider(create: (context) => AuthService()),
         ChangeNotifierProvider(create: (context) => PremiumService()),
         ChangeNotifierProvider(create: (context) => QuestionStyleService()),
-        Provider(create: (context) => UserQuestionService()),
+        ChangeNotifierProvider(create: (context) => UserQuestionService()), // UserQuestionService is ChangeNotifier
         ChangeNotifierProxyProvider<AuthService, QuestionProvider>(
           create: (context) => QuestionProvider(),
           update: (context, authService, questionProvider) {
@@ -47,7 +80,13 @@ void main() {
             return questionProvider;
           },
         ),
-        ChangeNotifierProvider(create: (context) => QuizProvider()),
+        ChangeNotifierProxyProvider<UserQuestionService, QuizProvider>( // Provide UserQuestionService to QuizProvider
+          create: (context) => QuizProvider(),
+          update: (context, userQuestionService, quizProvider) {
+            quizProvider!.setUserQuestionService(userQuestionService);
+            return quizProvider;
+          },
+        ),
         ChangeNotifierProvider(create: (context) => GratitudeProvider()),
         Provider(create: (context) => GratitudeThemeService()),
         ChangeNotifierProvider(create: (context) => ThemeService()),
@@ -147,7 +186,7 @@ class _MyAppState extends State<MyApp> {
             '/login': (context) => const LoginPage(),
             '/post-submit': (context) => const PostSubmitPage(username: 'default'),
             '/create-quiz': (context) => const CreateQuizPage(),
-            '/gratitude': (context) => const GratitudePage(),
+            '/gratitude': (context) => const ComingSoonPage(featureName: 'Gratitude Jar'), // Muted
             '/my-quizzes': (context) => const MyQuizzesPage(),
             '/home-dashboard': (context) => const HomeDashboardPage(),
           },

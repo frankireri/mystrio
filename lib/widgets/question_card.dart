@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mystrio/question_provider.dart';
+import 'package:mystrio/models/question.dart'; // Import the Question model
 
 class QuestionCard extends StatelessWidget {
   final Question question;

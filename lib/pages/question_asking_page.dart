@@ -5,13 +5,14 @@ import 'package:mystrio/pages/post_submit_page.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
 import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/services/question_style_service.dart';
+import 'package:mystrio/models/question.dart'; // Import the Question model
 import 'dart:math';
 
 class QuestionAskingPage extends StatefulWidget {
   final String username;
-  final String? question;
+  final Question? questionToAnswer; // Changed from String? question
 
-  const QuestionAskingPage({super.key, required this.username, this.question});
+  const QuestionAskingPage({super.key, required this.username, this.questionToAnswer});
 
   @override
   State<QuestionAskingPage> createState() => _QuestionAskingPageState();
@@ -68,7 +69,7 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
     ));
     _cardAnimationController.forward();
 
-    if (widget.question == null) {
+    if (widget.questionToAnswer == null) { // Check questionToAnswer
       _currentQuestionIndex = Random().nextInt(_predefinedQuestions.length);
     }
   }
@@ -83,14 +84,10 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
 
   void _submit() {
     String text;
-    if (widget.question != null) {
-      // Submitting an answer
+    if (widget.questionToAnswer != null) { // Submitting an answer to an existing question
       text = _customQuestionController.text;
       if (text.isNotEmpty) {
-        // Here you would typically find the original question in your provider and add the answer.
-        // For this example, we'll just add a new question with the answer.
-        final question = Question(questionText: widget.question!, answerText: text);
-        Provider.of<QuestionProvider>(context, listen: false).addAnswer(question, text);
+        Provider.of<QuestionProvider>(context, listen: false).addAnswer(widget.questionToAnswer!, text);
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -99,8 +96,7 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
         );
         _customQuestionController.clear();
       }
-    } else {
-      // Submitting a new question
+    } else { // Submitting a new question
       if (_isCustomQuestionMode) {
         text = _customQuestionController.text;
       } else {
@@ -147,7 +143,7 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
     final authService = Provider.of<AuthService>(context, listen: false);
     final questionStyleService = Provider.of<QuestionStyleService>(context, listen: false);
 
-    final String displayQuestion = widget.question ?? authService.chosenQuestionText ?? 'Ask @${widget.username} anything!';
+    final String displayQuestion = widget.questionToAnswer?.questionText ?? authService.chosenQuestionText ?? 'Ask @${widget.username} anything!';
     final QuestionStyle chosenStyle = questionStyleService.getStyleById(authService.chosenQuestionStyleId ?? 'default');
 
     return Scaffold(
@@ -201,7 +197,7 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 20),
-                      if (widget.question == null) ...[
+                      if (widget.questionToAnswer == null) ...[ // Check questionToAnswer
                         AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),
                           transitionBuilder: (Widget child, Animation<double> animation) {
@@ -310,7 +306,7 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
                                   backgroundColor: theme.colorScheme.secondary,
                                   foregroundColor: theme.colorScheme.onSecondary,
                                 ),
-                                child: Text(widget.question == null ? 'Submit Question' : 'Submit Answer'),
+                                child: Text(widget.questionToAnswer == null ? 'Submit Question' : 'Submit Answer'),
                               ),
                             );
                           },

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:mystrio/services/user_question_service.dart'; // Import UserQuestionService
 
 class QuizQuestion {
   String question;
@@ -108,6 +109,7 @@ class QuizProvider with ChangeNotifier {
 
   List<Quiz> _userQuizzes = [];
   Quiz? _currentQuiz; // The quiz currently being edited/viewed
+  late UserQuestionService _userQuestionService; // Declare UserQuestionService
 
   final List<QuizTheme> _themes = [
     QuizTheme(
@@ -185,6 +187,11 @@ class QuizProvider with ChangeNotifier {
     _loadQuizzes();
   }
 
+  // Setter for UserQuestionService
+  void setUserQuestionService(UserQuestionService service) {
+    _userQuestionService = service;
+  }
+
   Future<void> _loadQuizzes() async {
     final prefs = await SharedPreferences.getInstance();
     final quizzesString = prefs.getString(_quizzesKey);
@@ -254,11 +261,22 @@ class QuizProvider with ChangeNotifier {
     }
   }
 
-  void addLeaderboardEntryToCurrentQuiz(LeaderboardEntry entry) {
+  void addLeaderboardEntryToCurrentQuiz(LeaderboardEntry entry, String quizOwnerUsername) {
     if (_currentQuiz != null) {
       _currentQuiz!.leaderboard.add(entry);
       _currentQuiz!.leaderboard.sort((a, b) => b.score.compareTo(a.score));
       _saveQuizzes();
+
+      // Add quiz answer notification to the inbox
+      _userQuestionService.addQuizAnswerNotification(
+        quizOwnerUsername: quizOwnerUsername,
+        quizTakerUsername: entry.username,
+        quizName: _currentQuiz!.name,
+        quizId: _currentQuiz!.id,
+        score: entry.score,
+        totalQuestions: _currentQuiz!.questions.length,
+      );
+
       notifyListeners();
     }
   }
