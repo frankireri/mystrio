@@ -3,6 +3,7 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const axios = require('axios'); // For making HTTP requests to Kopo Kopo
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -18,6 +19,13 @@ const dbConfig = {
 
 // IMPORTANT: Replace with a long, random, secret string
 const JWT_SECRET = '0517AAF488012BB6C836C845D5E035CDC6EEF5B92E7A8C67589928BE985C8D01';
+
+// Kopo Kopo M-Pesa Configuration (use environment variables for production!)
+const KOPOKOPO_CLIENT_ID = process.env.KOPOKOPO_CLIENT_ID || 'QAKpUkYMaI7u1XzQ0Si3ahAQpUgkBH9NvK1eSo5XdII';
+const KOPOKOPO_CLIENT_SECRET = process.env.KOPOKOPO_CLIENT_SECRET || 'SFeifjjDrxz1HsN8qHfkBzflrCbZ6On1ynJquZQO1t0';
+const KOPOKOPO_API_KEY = process.env.KOPOKOPO_API_KEY || 'f306e47c883c259e718896768525070720cb98db';
+const KOPOKOPO_TILL_NUMBER = process.env.KOPOKOPO_TILL_NUMBER || '525881';
+const KOPOKOPO_BASE_URL = 'https://sandbox.kopokopo.com/api/v1'; // Use sandbox for testing, then production URL
 
 // --- Middleware ---
 app.use(cors());
@@ -51,6 +59,79 @@ const toCamelCase = (obj) => {
   return obj;
 };
 
+// Helper to format user data for response, including premium_until
+const formatUserForResponse = (user) => {
+  const formattedUser = toCamelCase({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    chosen_question_text: user.chosen_question_text,
+    chosen_question_style_id: user.chosen_question_style_id,
+    profile_image_path: user.profile_image_path,
+    premium_until: user.premium_until ? new Date(user.premium_until).toISOString() : null, // Format as ISO string
+  });
+  return formattedUser;
+};
+
+// --- Kopo Kopo Helpers ---
+let kopoKopoAccessToken = null;
+let kopoKopoTokenExpiry = 0;
+
+const getKopoKopoAccessToken = async () => {
+  if (kopoKopoAccessToken && Date.now() < kopoKopoTokenExpiry) {
+    return kopoKopoAccessToken;
+  }
+
+  try {
+    const response = await axios.post(`${KOPOKOPO_BASE_URL}/oauth/token`, {
+      client_id: KOPOKOPO_CLIENT_ID,
+      client_secret: KOPOKOPO_CLIENT_SECRET,
+      grant_type: 'client_credentials',
+    }, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+
+    kopoKopoAccessToken = response.data.access_token;
+    kopoKopoTokenExpiry = Date.now() + (response.data.expires_in * 1000) - 60000; // Refresh 1 minute before expiry
+    console.log('Kopo Kopo Access Token obtained.');
+    return kopoKopoAccessToken;
+  } catch (error) {
+    console.error('Error getting Kopo Kopo Access Token:', error.response ? error.response.data : error.message);
+    throw new Error('Failed to get Kopo Kopo Access Token');
+  }
+};
+
+const initiateKopoKopoSTKPush = async (phoneNumber, amount, callbackUrl, clientReference) => {
+  try {
+    const accessToken = await getKopoKopoAccessToken();
+    const response = await axios.post(`${KOPOKOPO_BASE_URL}/till_numbers/${KOPOKOPO_TILL_NUMBER}/stk_push`, {
+      amount: amount,
+      currency: 'KES',
+      metadata: {
+        client_reference: clientReference, // Use this to link payment to user/transaction
+        payment_type: 'premium_subscription',
+      },
+      callback_url: callbackUrl,
+      customer_phone_number: phoneNumber,
+    }, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Api-Key': KOPOKOPO_API_KEY,
+      },
+    });
+    console.log('Kopo Kopo STK Push initiated:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error initiating Kopo Kopo STK Push:', error.response ? error.response.data : error.message);
+    throw new Error('Failed to initiate STK Push');
+  }
+};
+
 
 // --- Auth Routes ---
 
@@ -65,7 +146,7 @@ app.post('/api/signup', async (req, res) => {
   try {
     connection = await mysql.createConnection(dbConfig);
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    const sql = `INSERT INTO users (username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path) VALUES (?, ?, ?, ?, ?, ?)`;
+    const sql = `INSERT INTO users (username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until) VALUES (?, ?, ?, ?, ?, ?, NULL)`;
     const [result] = await connection.execute(sql, [username, email, hashedPassword, chosenQuestionText, chosenQuestionStyleId, profileImagePath]);
     
     const newUser = {
@@ -74,7 +155,8 @@ app.post('/api/signup', async (req, res) => {
       email, 
       chosen_question_text: chosenQuestionText, 
       chosen_question_style_id: chosenQuestionStyleId, 
-      profile_image_path: profileImagePath 
+      profile_image_path: profileImagePath,
+      premium_until: null, // New users are not premium by default
     };
 
     // Generate JWT token for the newly registered user
@@ -83,7 +165,7 @@ app.post('/api/signup', async (req, res) => {
 
     res.status(201).json({ 
       token,
-      user: toCamelCase(newUser) // Nest newUser under 'user' key
+      user: formatUserForResponse(newUser)
     });
   } catch (error) {
     console.error('POST /api/signup - Error:', error);
@@ -110,7 +192,7 @@ app.post('/api/login', async (req, res) => {
   let connection;
   try {
     connection = await mysql.createConnection(dbConfig);
-    const sql = 'SELECT id, username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path FROM users WHERE email = ?';
+    const sql = 'SELECT id, username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until FROM users WHERE email = ?';
     const [rows] = await connection.execute(sql, [email]);
 
     if (rows.length === 0) {
@@ -131,14 +213,7 @@ app.post('/api/login', async (req, res) => {
       // Return user data in camelCase
       res.json({ 
         token, 
-        user: toCamelCase({
-          id: user.id, 
-          username: user.username, 
-          email: user.email,
-          chosen_question_text: user.chosen_question_text,
-          chosen_question_style_id: user.chosen_question_style_id,
-          profile_image_path: user.profile_image_path,
-        })
+        user: formatUserForResponse(user)
       });
     } else {
       // Passwords don't match
@@ -162,8 +237,8 @@ app.get('/api/users', async (req, res) => {
   try {
     connection = await mysql.createConnection(dbConfig);
     // Explicitly select columns to avoid sending the password hash
-    const [rows] = await connection.execute('SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path FROM users ORDER BY id');
-    res.json(toCamelCase(rows)); // Convert to camelCase
+    const [rows] = await connection.execute('SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until FROM users ORDER BY id');
+    res.json(rows.map(formatUserForResponse)); // Convert to camelCase and format premium_until
   } catch (error) {
     console.error('GET /api/users - Error:', error);
     res.status(500).json({ error: 'Failed to retrieve users.' });
@@ -197,7 +272,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 // PUT (update) a user by ID (Protected)
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { username, email, chosenQuestionText, chosenQuestionStyleId, profileImagePath } = req.body;
+  const { username, email, chosenQuestionText, chosenQuestionStyleId, profileImagePath, premiumUntil } = req.body;
   
   // Optional: Check if the logged-in user is the one they are trying to update
   if (req.user.id !== parseInt(id)) {
@@ -216,6 +291,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     if (chosenQuestionText !== undefined) { fields.push('chosen_question_text = ?'); values.push(chosenQuestionText); }
     if (chosenQuestionStyleId !== undefined) { fields.push('chosen_question_style_id = ?'); values.push(chosenQuestionStyleId); }
     if (profileImagePath !== undefined) { fields.push('profile_image_path = ?'); values.push(profileImagePath); }
+    if (premiumUntil !== undefined) { fields.push('premium_until = ?'); values.push(premiumUntil); } // Allow updating premium_until
 
     if (fields.length === 0) {
       return res.status(400).json({ error: 'No fields provided for update.' });
@@ -232,10 +308,10 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     
     // Fetch the updated user to return
     const [updatedUserRows] = await connection.execute(
-      'SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path FROM users WHERE id = ?',
+      'SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until FROM users WHERE id = ?',
       [id]
     );
-    res.json(toCamelCase(updatedUserRows[0])); // Convert to camelCase
+    res.json(formatUserForResponse(updatedUserRows[0])); // Convert to camelCase and format premium_until
 
   } catch (error) {
     console.error(`PUT /api/users/${id} - Error:`, error);
@@ -389,6 +465,81 @@ app.delete('/api/questions/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error(`DELETE /api/questions/${id} - Error:`, error);
     res.status(500).json({ error: 'Failed to delete question.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// --- Kopo Kopo Payment Routes ---
+
+// POST /api/payment/initiate-stk - Initiate an STK Push
+app.post('/api/payment/initiate-stk', authenticateToken, async (req, res) => {
+  const { phoneNumber, amount, userId } = req.body; // userId is from Flutter app, not JWT
+
+  if (!phoneNumber || !amount || !userId) {
+    return res.status(400).json({ error: 'Phone number, amount, and userId are required.' });
+  }
+
+  // Ensure the user initiating the payment is the logged-in user
+  if (req.user.id !== parseInt(userId)) {
+    return res.status(403).json({ error: 'Unauthorized payment initiation for this user.' });
+  }
+
+  try {
+    // Kopo Kopo requires phone number in E.164 format (e.g., +2547XXXXXXXX)
+    const formattedPhoneNumber = phoneNumber.startsWith('+') ? phoneNumber : `+254${phoneNumber.substring(phoneNumber.length - 9)}`;
+    
+    // The callback URL Kopo Kopo will hit after payment
+    const callbackUrl = `https://api.mystrio.top/api/payment/webhook`; // IMPORTANT: Use your actual domain
+
+    const kopoKopoResponse = await initiateKopoKopoSTKPush(
+      formattedPhoneNumber,
+      amount,
+      callbackUrl,
+      userId.toString() // Use userId as clientReference to link payment to user
+    );
+
+    res.json({ success: true, message: 'STK Push initiated successfully.', kopoKopoResponse });
+  } catch (error) {
+    console.error('Error in /api/payment/initiate-stk:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/payment/webhook - Kopo Kopo callback for payment status
+app.post('/api/payment/webhook', async (req, res) => {
+  console.log('Kopo Kopo Webhook received:', JSON.stringify(req.body, null, 2));
+
+  const { status, metadata, till_number, amount, currency, mpesa_receipt_number, customer_phone_number } = req.body;
+  const userId = metadata ? metadata.client_reference : null;
+  const paymentType = metadata ? metadata.payment_type : null;
+
+  if (!userId || paymentType !== 'premium_subscription') {
+    console.error('Webhook: Missing userId or invalid paymentType in metadata.');
+    return res.status(400).json({ error: 'Invalid webhook data.' });
+  }
+
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+
+    if (status === 'success') {
+      // Determine subscription duration (e.g., 1 month for a fixed amount)
+      const subscriptionMonths = 1; // Example: 1 month subscription
+      const expiryDate = new Date();
+      expiryDate.setMonth(expiryDate.getMonth() + subscriptionMonths);
+
+      const sql = 'UPDATE users SET premium_until = ? WHERE id = ?';
+      await connection.execute(sql, [expiryDate, userId]);
+      console.log(`Webhook: User ${userId} premium_until updated to ${expiryDate}`);
+    } else {
+      console.log(`Webhook: Payment for user ${userId} failed or was cancelled. Status: ${status}`);
+    }
+
+    res.status(200).send('Webhook received successfully.');
+  } catch (error) {
+    console.error('Webhook: Error processing payment:', error);
+    res.status(500).json({ error: 'Internal server error during webhook processing.' });
   } finally {
     if (connection) await connection.end();
   }

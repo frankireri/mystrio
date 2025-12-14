@@ -17,6 +17,7 @@ CREATE TABLE users (
   chosen_question_text TEXT, -- User's chosen default question text
   chosen_question_style_id VARCHAR(255), -- ID for the chosen question card style
   profile_image_path VARCHAR(255), -- Path to the user's profile image
+  premium_until TIMESTAMP NULL DEFAULT NULL, -- New: Timestamp when premium access expires
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -30,6 +31,7 @@ CREATE TABLE users (
 *   `chosen_question_text` (TEXT): The default question text chosen by the user. Can be NULL.
 *   `chosen_question_style_id` (VARCHAR(255)): Identifier for the style of the user's question card. Can be NULL.
 *   `profile_image_path` (VARCHAR(255)): URL or path to the user's profile image. Can be NULL.
+*   `premium_until` (TIMESTAMP, NULL, DEFAULT NULL): Timestamp indicating when premium access expires. NULL if not premium.
 *   `created_at` (TIMESTAMP): Timestamp when the user account was created.
 *   `updated_at` (TIMESTAMP): Timestamp when the user account was last updated.
 
