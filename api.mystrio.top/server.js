@@ -28,7 +28,31 @@ const KOPOKOPO_TILL_NUMBER = process.env.KOPOKOPO_TILL_NUMBER || '525881';
 const KOPOKOPO_BASE_URL = 'https://sandbox.kopokopo.com/api/v1'; // Use sandbox for testing, then production URL
 
 // --- Middleware ---
-app.use(cors());
+// NEW: Dynamic CORS configuration for development and production
+const allowedOrigins = ['https://mystrio.top']; // Always allow your production frontend
+if (process.env.NODE_ENV !== 'production') {
+  // In development, allow localhost on any port
+  allowedOrigins.push(/http:\/\/localhost:\d+/);
+}
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.some(pattern => {
+      if (typeof pattern === 'string') return pattern === origin;
+      return pattern.test(origin);
+    })) {
+      return callback(null, true);
+    }
+    console.log(`Blocked CORS request from origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'), false);
+  },
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+  credentials: true,
+  optionsSuccessStatus: 204
+};
+app.use(cors(corsOptions)); // Apply CORS middleware with options
 app.use(express.json());
 
 // Middleware to verify JWT
@@ -45,6 +69,37 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+// NEW: Middleware to verify if the user is an admin
+const authenticateAdmin = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (token == null) return res.sendStatus(401);
+
+  jwt.verify(token, JWT_SECRET, async (err, user) => {
+    if (err) return res.sendStatus(403);
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute('SELECT is_admin FROM users WHERE id = ?', [user.id]);
+
+      if (rows.length === 0 || !rows[0].is_admin) {
+        return res.status(403).json({ error: 'Forbidden: Requires admin privileges.' });
+      }
+
+      req.user = user; // Attach user payload to request
+      next();
+    } catch (error) {
+      console.error('Admin authentication error:', error);
+      res.status(500).json({ error: 'Failed to verify admin status.' });
+    } finally {
+      if (connection) await connection.end();
+    }
+  });
+};
+
+
 // Helper to convert snake_case to camelCase for API responses
 const toCamelCase = (obj) => {
   if (Array.isArray(obj)) {
@@ -59,7 +114,7 @@ const toCamelCase = (obj) => {
   return obj;
 };
 
-// Helper to format user data for response, including premium_until
+// Helper to format user data for response, including premium_until and is_admin
 const formatUserForResponse = (user) => {
   const formattedUser = toCamelCase({
     id: user.id,
@@ -69,6 +124,7 @@ const formatUserForResponse = (user) => {
     chosen_question_style_id: user.chosen_question_style_id,
     profile_image_path: user.profile_image_path,
     premium_until: user.premium_until ? new Date(user.premium_until).toISOString() : null, // Format as ISO string
+    is_admin: user.is_admin, // NEW: Include admin status
   });
   return formattedUser;
 };
@@ -146,24 +202,25 @@ app.post('/api/signup', async (req, res) => {
   try {
     connection = await mysql.createConnection(dbConfig);
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    const sql = `INSERT INTO users (username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until) VALUES (?, ?, ?, ?, ?, ?, NULL)`;
+    const sql = `INSERT INTO users (username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until, is_admin) VALUES (?, ?, ?, ?, ?, ?, NULL, FALSE)`;
     const [result] = await connection.execute(sql, [username, email, hashedPassword, chosenQuestionText, chosenQuestionStyleId, profileImagePath]);
-    
+
     const newUser = {
-      id: result.insertId, 
-      username, 
-      email, 
-      chosen_question_text: chosenQuestionText, 
-      chosen_question_style_id: chosenQuestionStyleId, 
+      id: result.insertId,
+      username,
+      email,
+      chosen_question_text: chosenQuestionText,
+      chosen_question_style_id: chosenQuestionStyleId,
       profile_image_path: profileImagePath,
-      premium_until: null, // New users are not premium by default
+      premium_until: null,
+      is_admin: false,
     };
 
     // Generate JWT token for the newly registered user
     const tokenPayload = { id: newUser.id, username: newUser.username };
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '1d' }); // Token expires in 1 day
 
-    res.status(201).json({ 
+    res.status(201).json({
       token,
       user: formatUserForResponse(newUser)
     });
@@ -192,7 +249,7 @@ app.post('/api/login', async (req, res) => {
   let connection;
   try {
     connection = await mysql.createConnection(dbConfig);
-    const sql = 'SELECT id, username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until FROM users WHERE email = ?';
+    const sql = 'SELECT id, username, email, password, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until, is_admin FROM users WHERE email = ?';
     const [rows] = await connection.execute(sql, [email]);
 
     if (rows.length === 0) {
@@ -209,10 +266,10 @@ app.post('/api/login', async (req, res) => {
       // Passwords match, create JWT
       const tokenPayload = { id: user.id, username: user.username };
       const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '1d' }); // Token expires in 1 day
-      
+
       // Return user data in camelCase
-      res.json({ 
-        token, 
+      res.json({
+        token,
         user: formatUserForResponse(user)
       });
     } else {
@@ -237,7 +294,7 @@ app.get('/api/users', async (req, res) => {
   try {
     connection = await mysql.createConnection(dbConfig);
     // Explicitly select columns to avoid sending the password hash
-    const [rows] = await connection.execute('SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until FROM users ORDER BY id');
+    const [rows] = await connection.execute('SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until, is_admin FROM users ORDER BY id');
     res.json(rows.map(formatUserForResponse)); // Convert to camelCase and format premium_until
   } catch (error) {
     console.error('GET /api/users - Error:', error);
@@ -273,7 +330,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { username, email, chosenQuestionText, chosenQuestionStyleId, profileImagePath, premiumUntil } = req.body;
-  
+
   // Optional: Check if the logged-in user is the one they are trying to update
   if (req.user.id !== parseInt(id)) {
       return res.status(403).json({ error: "You can only update your own account." });
@@ -282,7 +339,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await mysql.createConnection(dbConfig);
-    
+
     const fields = [];
     const values = [];
 
@@ -305,10 +362,10 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'User not found.' });
     }
-    
+
     // Fetch the updated user to return
     const [updatedUserRows] = await connection.execute(
-      'SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until FROM users WHERE id = ?',
+      'SELECT id, username, email, chosen_question_text, chosen_question_style_id, profile_image_path, premium_until, is_admin FROM users WHERE id = ?',
       [id]
     );
     res.json(formatUserForResponse(updatedUserRows[0])); // Convert to camelCase and format premium_until
@@ -361,7 +418,7 @@ app.post('/api/questions', authenticateToken, async (req, res) => {
     connection = await mysql.createConnection(dbConfig);
     const sql = 'INSERT INTO questions (user_id, question_text, is_from_ai, hints) VALUES (?, ?, ?, ?)';
     const [result] = await connection.execute(sql, [req.user.id, questionText, isFromAI, JSON.stringify(hints)]);
-    
+
     res.status(201).json(toCamelCase({ // Convert response to camelCase
       id: result.insertId,
       user_id: req.user.id,
@@ -387,7 +444,7 @@ app.put('/api/questions/:id', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await mysql.createConnection(dbConfig);
-    
+
     // First, verify the question belongs to the authenticated user
     const [questionRows] = await connection.execute('SELECT user_id FROM questions WHERE id = ?', [id]);
     if (questionRows.length === 0) {
@@ -404,7 +461,7 @@ app.put('/api/questions/:id', authenticateToken, async (req, res) => {
     if (answerText !== undefined) { fields.push('answer_text = ?'); values.push(answerText); }
     if (isFromAI !== undefined) { fields.push('is_from_ai = ?'); values.push(isFromAI); }
     if (hints !== undefined) { fields.push('hints = ?'); values.push(hints ? JSON.stringify(hints) : null); }
-    
+
     if (fields.length === 0) {
       return res.status(400).json({ error: 'No fields provided for update.' });
     }
@@ -417,7 +474,7 @@ app.put('/api/questions/:id', authenticateToken, async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Question not found or no changes made.' });
     }
-    
+
     // Fetch the updated question to return
     const [updatedQuestionRows] = await connection.execute(
       'SELECT id, question_text, answer_text, is_from_ai, hints, created_at, updated_at FROM questions WHERE id = ?',
@@ -434,7 +491,7 @@ app.put('/api/questions/:id', authenticateToken, async (req, res) => {
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'This email address is already in use.' });
     }
-    res.status(500).json({ error: 'Failed to update question.' });
+    res.status(500).json({ error: 'Failed to update user.' });
   } finally {
     if (connection) await connection.end();
   }
@@ -482,13 +539,13 @@ app.post('/api/payment/initiate-stk', authenticateToken, async (req, res) => {
 
   // Ensure the user initiating the payment is the logged-in user
   if (req.user.id !== parseInt(userId)) {
-    return res.status(403).json({ error: 'Unauthorized payment initiation for this user.' });
+    return res.status(403).json({ error: "You can only update your own account." });
   }
 
   try {
     // Kopo Kopo requires phone number in E.164 format (e.g., +2547XXXXXXXX)
     const formattedPhoneNumber = phoneNumber.startsWith('+') ? phoneNumber : `+254${phoneNumber.substring(phoneNumber.length - 9)}`;
-    
+
     // The callback URL Kopo Kopo will hit after payment
     const callbackUrl = `https://api.mystrio.top/api/payment/webhook`; // IMPORTANT: Use your actual domain
 
@@ -540,6 +597,274 @@ app.post('/api/payment/webhook', async (req, res) => {
   } catch (error) {
     console.error('Webhook: Error processing payment:', error);
     res.status(500).json({ error: 'Internal server error during webhook processing.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// NEW: --- Admin Routes ---
+
+// GET /api/admin/stats - Get dashboard statistics
+app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+    const [totalUsers] = await connection.execute('SELECT COUNT(*) as count FROM users');
+    const [premiumUsers] = await connection.execute('SELECT COUNT(*) as count FROM users WHERE premium_until > NOW()');
+    const [recentSignups] = await connection.execute('SELECT id, username, email, created_at FROM users ORDER BY created_at DESC LIMIT 5');
+
+    res.json({
+      totalUsers: totalUsers[0].count,
+      premiumUsers: premiumUsers[0].count,
+      recentSignups: toCamelCase(recentSignups),
+    });
+  } catch (error) {
+    console.error('GET /api/admin/stats - Error:', error);
+    res.status(500).json({ error: 'Failed to retrieve admin stats.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// GET /api/admin/users - Get all users for admin management
+app.get('/api/admin/users', authenticateAdmin, async (req, res) => {
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+    const [rows] = await connection.execute('SELECT id, username, email, created_at, premium_until, is_admin FROM users ORDER BY id');
+    res.json(rows.map(formatUserForResponse));
+  } catch (error) {
+    console.error('GET /api/admin/users - Error:', error);
+    res.status(500).json({ error: 'Failed to retrieve users.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// GET /api/admin/users/:id/activity - Get activity for a specific user
+app.get('/api/admin/users/:id/activity', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+
+    // Count questions asked by this user
+    const [questionsAskedResult] = await connection.execute(
+      'SELECT COUNT(*) as count FROM questions WHERE user_id = ?',
+      [id]
+    );
+    const totalQuestionsAsked = questionsAskedResult[0].count;
+
+    // Count answers given by this user (assuming answer_text is not NULL)
+    const [answersGivenResult] = await connection.execute(
+      'SELECT COUNT(*) as count FROM questions WHERE user_id = ? AND answer_text IS NOT NULL',
+      [id]
+    );
+    const totalAnswersGiven = answersGivenResult[0].count;
+
+    // Count quizzes created by this user
+    const [quizzesCreatedResult] = await connection.execute(
+      'SELECT COUNT(*) as count FROM quizzes WHERE user_id = ?',
+      [id]
+    );
+    const totalQuizzesCreated = quizzesCreatedResult[0].count;
+
+
+    res.json(toCamelCase({
+      totalQuestionsAsked,
+      totalAnswersGiven,
+      totalQuizzesCreated, // NEW: Include quizzes created
+    }));
+  } catch (error) {
+    console.error(`GET /api/admin/users/${id}/activity - Error:`, error);
+    // NEW: Check for ER_NO_SUCH_TABLE specifically for quizzes
+    if (error.code === 'ER_NO_SUCH_TABLE') {
+      return res.status(500).json({ error: "Database table 'quizzes' not found. Please create it." });
+    }
+    res.status(500).json({ error: 'Failed to retrieve user activity.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+
+// PUT /api/admin/users/:id - Update a user's details (admin)
+app.put('/api/admin/users/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { username, email, premiumUntil, isAdmin } = req.body;
+
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+
+    const fields = [];
+    const values = [];
+
+    if (username !== undefined) { fields.push('username = ?'); values.push(username); }
+    if (email !== undefined) { fields.push('email = ?'); values.push(email); }
+    if (premiumUntil !== undefined) { fields.push('premium_until = ?'); values.push(premiumUntil); }
+    if (isAdmin !== undefined) { fields.push('is_admin = ?'); values.push(isAdmin); }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No fields provided for update.' });
+    }
+
+    const sql = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+    values.push(id);
+
+    const [result] = await connection.execute(sql, values);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    res.json({ success: true, message: 'User updated successfully.' });
+  } catch (error) {
+    console.error(`PUT /api/admin/users/${id} - Error:`, error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'This email address is already in use.' });
+    }
+    res.status(500).json({ error: 'Failed to update user.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// DELETE /api/admin/users/:id - Delete a user (admin)
+app.delete('/api/admin/users/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+    const [result] = await connection.execute('DELETE FROM questions WHERE id = ?', [id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Question not found.' });
+    res.status(204).send();
+  } catch (error) {
+    console.error(`DELETE /api/admin/users/${id} - Error:`, error);
+    res.status(500).json({ error: 'Failed to delete user.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// NEW: --- Admin Question Moderation Routes ---
+
+// GET /api/admin/questions - Get all questions for moderation
+app.get('/api/admin/questions', authenticateAdmin, async (req, res) => {
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+    // Join with users table to get username and email of the question owner
+    const [rows] = await connection.execute(`
+      SELECT 
+        q.id, 
+        q.question_text, 
+        q.answer_text, 
+        q.is_from_ai, 
+        q.hints, 
+        q.created_at, 
+        u.username, 
+        u.email 
+      FROM questions q
+      JOIN users u ON q.user_id = u.id
+      ORDER BY q.created_at DESC
+    `);
+    
+    // Format hints and convert to camelCase
+    const questions = rows.map(row => ({
+      ...toCamelCase(row),
+      hints: row.hints ? JSON.parse(row.hints) : {},
+      ownerUsername: row.username, // Add owner's username
+      ownerEmail: row.email,       // Add owner's email
+    }));
+    res.json(questions);
+  } catch (error) {
+    console.error('GET /api/admin/questions - Error:', error);
+    res.status(500).json({ error: 'Failed to retrieve questions for moderation.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// DELETE /api/admin/questions/:id - Delete a question (admin)
+app.delete('/api/admin/questions/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+    const [result] = await connection.execute('DELETE FROM questions WHERE id = ?', [id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Question not found.' });
+    res.status(204).send(); // 204 No Content for successful deletion
+  } catch (error) {
+    console.error(`DELETE /api/admin/questions/${id} - Error:`, error);
+    res.status(500).json({ error: 'Failed to delete question.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// NEW: --- Admin Quiz Moderation Routes ---
+// NOTE: These routes assume you have a 'quizzes' table in your database.
+// If not, you'll need to create it first.
+
+// GET /api/admin/quizzes - Get all quizzes for moderation
+app.get('/api/admin/quizzes', authenticateAdmin, async (req, res) => {
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+    // Assuming a 'quizzes' table exists with at least id, title, user_id, created_at
+    // Join with users table to get username and email of the quiz owner
+    const [rows] = await connection.execute(`
+      SELECT 
+        qz.id, 
+        qz.title, 
+        qz.description, 
+        qz.created_at, 
+        u.username, 
+        u.email 
+      FROM quizzes qz
+      LEFT JOIN users u ON qz.user_id = u.id
+      ORDER BY qz.created_at DESC
+    `);
+    
+    // Format and convert to camelCase
+    const quizzes = rows.map(row => ({
+      ...toCamelCase(row),
+      ownerUsername: row.username, // Add owner's username
+      ownerEmail: row.email,       // Add owner's email
+    }));
+    res.json(quizzes);
+  } catch (error) {
+    console.error('GET /api/admin/quizzes - Error:', error);
+    // NEW: Check for ER_NO_SUCH_TABLE specifically
+    if (error.code === 'ER_NO_SUCH_TABLE') {
+      return res.status(500).json({ error: "Database table 'quizzes' not found. Please create it." });
+    }
+    res.status(500).json({ error: 'Failed to retrieve quizzes for moderation.' });
+  } finally {
+    if (connection) await connection.end();
+  }
+});
+
+// DELETE /api/admin/quizzes/:id - Delete a quiz (admin)
+app.delete('/api/admin/quizzes/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  let connection;
+  try {
+    connection = await mysql.createConnection(dbConfig);
+    const [result] = await connection.execute('DELETE FROM quizzes WHERE id = ?', [id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Quiz not found.' });
+    res.status(204).send(); // 204 No Content for successful deletion
+  } catch (error) {
+    console.error(`DELETE /api/admin/quizzes/${id} - Error:`, error);
+    // NEW: Check for ER_NO_SUCH_TABLE specifically
+    if (error.code === 'ER_NO_SUCH_TABLE') {
+      return res.status(500).json({ error: "Database table 'quizzes' not found. Please create it." });
+    }
+    res.status(500).json({ error: 'Failed to delete quiz.' });
   } finally {
     if (connection) await connection.end();
   }

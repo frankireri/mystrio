@@ -2,43 +2,6 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:mystrio/models/question.dart'; // Import the shared Question model
 
-// The Question class definition is now in lib/models/question.dart, so we remove it here.
-// class Question {
-//   final String id;
-//   final String questionText;
-//   String? answerText;
-//   final bool isFromAI;
-//   final Map<String, String> hints;
-
-//   Question({
-//     required this.id,
-//     required this.questionText,
-//     this.answerText,
-//     this.isFromAI = false,
-//     this.hints = const {},
-//   });
-
-//   factory Question.fromJson(Map<String, dynamic> json) {
-//     return Question(
-//       id: json['id'],
-//       questionText: json['questionText'],
-//       answerText: json['answerText'],
-//       isFromAI: json['isFromAI'] ?? false,
-//       hints: Map<String, String>.from(json['hints'] ?? {}),
-//     );
-//   }
-
-//   Map<String, dynamic> toJson() {
-//     return {
-//       'id': id,
-//       'questionText': questionText,
-//       'answerText': answerText,
-//       'isFromAI': isFromAI,
-//       'hints': hints,
-//     };
-//   }
-// }
-
 class MystrioApi {
   final String _baseUrl = 'https://api.mystrio.top'; // Your API base URL
 
@@ -50,6 +13,31 @@ class MystrioApi {
     }
     return headers;
   }
+
+  // --- NEW: Generic HTTP Methods ---
+
+  Future<http.Response> get(String endpoint, {String? token}) async {
+    final url = Uri.parse('$_baseUrl/api$endpoint');
+    return await http.get(url, headers: _getHeaders(token));
+  }
+
+  Future<http.Response> post(String endpoint, {String? token, Map<String, dynamic>? body}) async {
+    final url = Uri.parse('$_baseUrl/api$endpoint');
+    return await http.post(url, headers: _getHeaders(token), body: json.encode(body));
+  }
+
+  Future<http.Response> put(String endpoint, {required String token, Map<String, dynamic>? body}) async {
+    final url = Uri.parse('$_baseUrl/api$endpoint');
+    return await http.put(url, headers: _getHeaders(token), body: json.encode(body));
+  }
+
+  Future<http.Response> delete(String endpoint, {required String token}) async {
+    final url = Uri.parse('$_baseUrl/api$endpoint');
+    return await http.delete(url, headers: _getHeaders(token));
+  }
+
+
+  // --- Specific Methods (can be refactored to use generic methods later) ---
 
   // Method for user registration
   Future<Map<String, dynamic>> register({
@@ -113,7 +101,6 @@ class MystrioApi {
     String? chosenQuestionStyleId,
     String? profileImagePath,
   }) async {
-    final url = Uri.parse('$_baseUrl/api/users/$userId');
     final Map<String, dynamic> body = {};
     if (username != null) body['username'] = username;
     if (email != null) body['email'] = email;
@@ -126,11 +113,7 @@ class MystrioApi {
     }
 
     try {
-      final response = await http.put(
-        url,
-        headers: _getHeaders(authToken),
-        body: json.encode(body),
-      );
+      final response = await put('/users/$userId', token: authToken, body: body);
       return _handleResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
@@ -141,12 +124,8 @@ class MystrioApi {
   Future<Map<String, dynamic>> getQuestions({
     required String authToken,
   }) async {
-    final url = Uri.parse('$_baseUrl/api/questions'); // No userId in URL, uses JWT
     try {
-      final response = await http.get(
-        url,
-        headers: _getHeaders(authToken),
-      );
+      final response = await get('/questions', token: authToken);
       return _handleResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
@@ -160,17 +139,12 @@ class MystrioApi {
     required Map<String, String> hints,
     required String authToken,
   }) async {
-    final url = Uri.parse('$_baseUrl/api/questions');
     try {
-      final response = await http.post(
-        url,
-        headers: _getHeaders(authToken),
-        body: json.encode({
-          'questionText': questionText, // Server expects camelCase
-          'isFromAI': isFromAI,         // Server expects camelCase
-          'hints': hints,
-        }),
-      );
+      final response = await post('/questions', token: authToken, body: {
+        'questionText': questionText,
+        'isFromAI': isFromAI,
+        'hints': hints,
+      });
       return _handleResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
@@ -183,15 +157,10 @@ class MystrioApi {
     required String answerText,
     required String authToken,
   }) async {
-    final url = Uri.parse('$_baseUrl/api/questions/$questionId'); // PUT to question ID
     try {
-      final response = await http.put(
-        url,
-        headers: _getHeaders(authToken),
-        body: json.encode({
-          'answerText': answerText, // Server expects camelCase
-        }),
-      );
+      final response = await put('/questions/$questionId', token: authToken, body: {
+        'answerText': answerText,
+      });
       return _handleResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
@@ -202,15 +171,22 @@ class MystrioApi {
   Map<String, dynamic> _handleResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       // Success
-      return {'success': true, 'data': json.decode(response.body)};
+      try {
+        // Handle cases where the body might be empty (e.g., 204 No Content)
+        if (response.body.isEmpty) {
+          return {'success': true, 'data': null};
+        }
+        return {'success': true, 'data': json.decode(response.body)};
+      } catch (e) {
+        return {'success': false, 'message': 'Failed to parse server response.'};
+      }
     } else {
       // Error
       String errorMessage = 'An unknown error occurred.';
       try {
         final errorData = json.decode(response.body);
-        errorMessage = errorData['message'] ?? errorMessage;
+        errorMessage = errorData['error'] ?? 'Server error: ${response.statusCode}';
       } catch (e) {
-        // If response body is not JSON or message field is missing
         errorMessage = 'Server error: ${response.statusCode}';
       }
       return {'success': false, 'message': errorMessage};
