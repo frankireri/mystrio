@@ -4,6 +4,8 @@ import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/quiz_provider.dart';
 import 'package:mystrio/gratitude_provider.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+// import 'package:mystrio/widgets/ad_widget.dart';
 
 class HomeDashboardPage extends StatelessWidget {
   const HomeDashboardPage({super.key});
@@ -29,6 +31,11 @@ class HomeDashboardPage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // if (kIsWeb) ...[
+              //   const SizedBox(height: 16),
+              //   const AdWidget(),
+              //   const SizedBox(height: 16),
+              // ],
               Text(
                 'Your Activities',
                 style: theme.textTheme.headlineMedium,

@@ -4,6 +4,7 @@ class Question {
   String? answerText;
   final bool isFromAI;
   final Map<String, String> hints;
+  final String code;
 
   Question({
     required this.id,
@@ -11,6 +12,7 @@ class Question {
     this.answerText,
     this.isFromAI = false,
     this.hints = const {},
+    required this.code,
   });
 
   factory Question.fromJson(Map<String, dynamic> json) {
@@ -20,6 +22,7 @@ class Question {
       answerText: json['answerText'],
       isFromAI: json['isFromAI'] ?? false,
       hints: Map<String, String>.from(json['hints'] ?? {}),
+      code: json['code'],
     );
   }
 
@@ -30,6 +33,7 @@ class Question {
       'answerText': answerText,
       'isFromAI': isFromAI,
       'hints': hints,
+      'code': code,
     };
   }
 }

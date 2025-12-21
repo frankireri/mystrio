@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:mystrio/question_provider.dart';
-import 'package:mystrio/auth_service.dart';
-import 'package:mystrio/widgets/shareable_story_card.dart';
-import 'package:share_plus/share_plus.dart';
-import 'dart:typed_data';
-import 'package:confetti/confetti.dart';
+import 'package:mystrio/services/user_question_service.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
-import 'dart:ui' as ui;
-import 'package:flutter/rendering.dart' as rendering;
-import 'package:mystrio/models/question.dart'; // Import the Question model
 
+// MODIFIED: This page now handles answering anonymous questions from the inbox.
 class AnswerPage extends StatefulWidget {
-  final Question question;
+  final int questionId;
+  final String questionText;
 
-  const AnswerPage({super.key, required this.question});
+  const AnswerPage({
+    super.key,
+    required this.questionId,
+    required this.questionText,
+  });
 
   @override
   State<AnswerPage> createState() => _AnswerPageState();
@@ -22,34 +20,15 @@ class AnswerPage extends StatefulWidget {
 
 class _AnswerPageState extends State<AnswerPage> with TickerProviderStateMixin {
   final TextEditingController _answerController = TextEditingController();
-  final GlobalKey _repaintBoundaryKey = GlobalKey();
-  late ConfettiController _confettiController;
-
-  late AnimationController _submitButtonAnimationController;
-  late Animation<double> _submitButtonScaleAnimation;
+  bool _isSubmitting = false; // To prevent multiple submissions
 
   int _characterCount = 0;
-  static const int _maxCharacters = 200;
+  static const int _maxCharacters = 280; // Increased character limit
 
   @override
   void initState() {
     super.initState();
-    _answerController.text = widget.question.answerText ?? '';
-    _characterCount = _answerController.text.length;
     _answerController.addListener(_updateCharacterCount);
-
-    _confettiController = ConfettiController(duration: const Duration(seconds: 2));
-
-    _submitButtonAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 150),
-    );
-    _submitButtonScaleAnimation = Tween<double>(begin: 1.0, end: 0.95).animate(
-      CurvedAnimation(
-        parent: _submitButtonAnimationController,
-        curve: Curves.easeOut,
-      ),
-    );
   }
 
   void _updateCharacterCount() {
@@ -60,73 +39,61 @@ class _AnswerPageState extends State<AnswerPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _confettiController.dispose();
-    _submitButtonAnimationController.dispose();
     _answerController.removeListener(_updateCharacterCount);
     _answerController.dispose();
     super.dispose();
   }
 
-  void _submitAnswer() {
-    if (_answerController.text.isNotEmpty && _characterCount <= _maxCharacters) {
-      Provider.of<QuestionProvider>(context, listen: false)
-          .addAnswer(widget.question, _answerController.text);
-      Navigator.of(context).pop();
-    } else if (_characterCount > _maxCharacters) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Answer is too long!', style: Theme.of(context).textTheme.bodyMedium)),
-      );
-    }
-  }
+  // MODIFIED: Submits the answer using UserQuestionService
+  Future<void> _submitAnswer() async {
+    if (_isSubmitting) return;
 
-  Future<Uint8List?> _capturePng() async {
-    try {
-      rendering.RenderRepaintBoundary? boundary =
-          _repaintBoundaryKey.currentContext?.findRenderObject() as rendering.RenderRepaintBoundary?;
-      if (boundary == null) {
-        return null;
+    if (_answerController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please type an answer.')),
+      );
+      return;
+    }
+    if (_characterCount > _maxCharacters) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your answer is too long.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    final success = await Provider.of<UserQuestionService>(context, listen: false)
+        .postAnswerToAnonymousQuestion(
+      questionId: widget.questionId,
+      answerText: _answerController.text,
+    );
+
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Your answer has been posted!')),
+        );
+        Navigator.of(context).pop(); // Go back to the inbox
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to post answer. Please try again.')),
+        );
       }
-      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      return byteData?.buffer.asUint8List();
-    } catch (e) {
-      print("Error capturing image: $e");
-      return null;
+      setState(() {
+        _isSubmitting = false;
+      });
     }
   }
 
+  // NOTE: Sharing is temporarily disabled for this flow.
+  // The previous implementation depended on a different data model.
   Future<void> _shareAnswer() async {
-    if (widget.question.answerText == null || widget.question.answerText!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please answer the question before sharing!', style: Theme.of(context).textTheme.bodyMedium)),
-      );
-      return;
-    }
-
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final username = authService.username;
-
-    if (username == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please set a username to share!', style: Theme.of(context).textTheme.bodyMedium)),
-      );
-      return;
-    }
-
-    final Uint8List? bytes = await _capturePng();
-
-    if (bytes != null) {
-      final profileUrl = 'https://your-app.com/profile/$username';
-      await Share.shareXFiles(
-        [XFile.fromData(bytes, mimeType: 'image/png', name: 'mystrio_answer.png')],
-        text: 'Check out my answer on Mystrio! Ask me anything: $profileUrl',
-      );
-      _confettiController.play();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to generate share image.', style: Theme.of(context).textTheme.bodyMedium)),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('You can share your answer after posting it! (Coming Soon)')),
+    );
   }
 
   @override
@@ -135,133 +102,98 @@ class _AnswerPageState extends State<AnswerPage> with TickerProviderStateMixin {
     return Scaffold(
       appBar: CustomAppBar(
         title: 'Answer Question',
-        backgroundColor: theme.colorScheme.surface,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.share, color: theme.colorScheme.onSurface),
-            onPressed: _shareAnswer,
-          ),
-        ],
+        // Sharing is disabled for now.
+        // actions: [
+        //   IconButton(
+        //     icon: Icon(Icons.share, color: theme.colorScheme.onSurface),
+        //     onPressed: _shareAnswer,
+        //   ),
+        // ],
       ),
-      body: Container(
-        color: theme.colorScheme.background,
-        child: Stack(
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Card(
-                    color: theme.cardTheme.color,
-                    elevation: theme.cardTheme.elevation,
-                    shape: theme.cardTheme.shape,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Question:',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              color: theme.colorScheme.secondary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            widget.question.questionText,
-                            style: theme.textTheme.titleMedium,
-                          ),
-                        ],
+            // Display the question
+            Card(
+              elevation: 0,
+              color: theme.colorScheme.surfaceVariant.withOpacity(0.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Anonymous Question:',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Your Answer:',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: theme.colorScheme.secondary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Card(
-                    color: theme.cardTheme.color,
-                    elevation: theme.cardTheme.elevation,
-                    shape: theme.cardTheme.shape,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          TextField(
-                            controller: _answerController,
-                            decoration: InputDecoration(
-                              hintText: 'Type your answer here...',
-                              border: InputBorder.none,
-                              hintStyle: theme.inputDecorationTheme.hintStyle,
-                            ),
-                            maxLines: null,
-                            maxLength: _maxCharacters,
-                            keyboardType: TextInputType.multiline,
-                            style: theme.textTheme.bodyMedium,
-                            cursorColor: theme.colorScheme.secondary,
-                          ),
-                          Text(
-                            '$_characterCount/$_maxCharacters',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: _characterCount > _maxCharacters
-                                  ? theme.colorScheme.error
-                                  : theme.colorScheme.onSurface.withOpacity(0.6),
-                            ),
-                          ),
-                        ],
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.questionText, // Use questionText from the widget
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: theme.colorScheme.onSurface,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  GestureDetector(
-                    onTapDown: (_) => _submitButtonAnimationController.forward(),
-                    onTapUp: (_) => _submitButtonAnimationController.reverse(),
-                    onTapCancel: () => _submitButtonAnimationController.reverse(),
-                    onTap: _submitAnswer,
-                    child: AnimatedBuilder(
-                      animation: _submitButtonScaleAnimation,
-                      builder: (context, child) {
-                        return Transform.scale(
-                          scale: _submitButtonScaleAnimation.value,
-                          child: ElevatedButton(
-                            onPressed: _submitAnswer,
-                            child: const Text('Submit Answer'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Input field for the answer
+            Card(
+              elevation: 2,
+              shadowColor: Colors.black.withOpacity(0.1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    TextField(
+                      controller: _answerController,
+                      decoration: const InputDecoration(
+                        hintText: 'Type your public answer here...',
+                        border: InputBorder.none,
+                      ),
+                      maxLines: 8,
+                      maxLength: _maxCharacters,
+                      keyboardType: TextInputType.multiline,
+                      buildCounter: (context, {required currentLength, required isFocused, maxLength}) {
+                        // This builds the character counter inside the TextField decoration
+                        return Text(
+                          '$currentLength/$maxLength',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: currentLength > _maxCharacters
+                                ? theme.colorScheme.error
+                                : theme.colorScheme.onSurface.withOpacity(0.6),
                           ),
                         );
                       },
                     ),
-                  ),
-                ],
-              ),
-            ),
-            // Hidden widget to be converted to image
-            Offstage(
-              offstage: true,
-              child: RepaintBoundary(
-                key: _repaintBoundaryKey,
-                child: ShareableStoryCard(
-                  question: widget.question,
-                  username: Provider.of<AuthService>(context, listen: false).username ?? 'MystrioUser',
+                  ],
                 ),
               ),
             ),
-            Align(
-              alignment: Alignment.topCenter,
-              child: ConfettiWidget(
-                confettiController: _confettiController,
-                blastDirectionality: BlastDirectionality.explosive,
-                shouldLoop: false,
-                colors: const [Colors.green, Colors.blue, Colors.pink, Colors.orange, Colors.purple],
-                createParticlePath: (size) => Path(),
+            const SizedBox(height: 24),
+            // Submit button
+            ElevatedButton(
+              onPressed: _isSubmitting ? null : _submitAnswer,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
+              child: _isSubmitting
+                  ? const SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+                    )
+                  : const Text('Post Answer Publicly'),
             ),
           ],
         ),

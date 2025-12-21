@@ -17,7 +17,7 @@ class SharedQuestionLandingPage extends StatefulWidget {
 }
 
 class _SharedQuestionLandingPageState extends State<SharedQuestionLandingPage> {
-  Future<Map<String, dynamic>?>? _questionFuture; // Changed to dynamic
+  Future<Map<String, dynamic>?>? _questionFuture;
   final TextEditingController _answerController = TextEditingController();
 
   @override
@@ -39,6 +39,7 @@ class _SharedQuestionLandingPageState extends State<SharedQuestionLandingPage> {
       userQuestionService.addReplyToQuestion(
         questionCode: questionData['code'],
         replyText: _answerController.text,
+        styleId: questionData['styleId'],
       );
 
       debugPrint('SharedQuestionLandingPage: Anonymous answer submitted for question ${questionData['code']}: ${_answerController.text}');

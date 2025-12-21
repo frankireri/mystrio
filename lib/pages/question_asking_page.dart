@@ -37,6 +37,8 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
   ];
   int _currentQuestionIndex = 0;
   bool _isCustomQuestionMode = false;
+  bool _isLoading = false; // New state
+  String? _errorMessage; // New state
 
   @override
   void initState() {
@@ -82,37 +84,58 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
     String text;
     if (widget.questionToAnswer != null) { // Submitting an answer to an existing question
       text = _customQuestionController.text;
-      if (text.isNotEmpty) {
-        Provider.of<QuestionProvider>(context, listen: false).addAnswer(widget.questionToAnswer!, text);
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PostSubmitPage(username: widget.username),
-          ),
-        );
-        _customQuestionController.clear();
-      }
     } else { // Submitting a new question
       if (_isCustomQuestionMode) {
         text = _customQuestionController.text;
       } else {
         text = _predefinedQuestions[_currentQuestionIndex];
       }
+    }
 
-      if (text.isNotEmpty) {
-        Provider.of<QuestionProvider>(context, listen: false).addQuestion(text);
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PostSubmitPage(username: widget.username),
-          ),
-        );
-        _customQuestionController.clear();
+    if (text.isNotEmpty) {
+      try {
+        if (widget.questionToAnswer != null) {
+          await Provider.of<QuestionProvider>(context, listen: false).addAnswer(widget.questionToAnswer!, text);
+        } else {
+          await Provider.of<QuestionProvider>(context, listen: false).addQuestion(text);
+        }
+
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PostSubmitPage(username: widget.username),
+            ),
+          );
+          _customQuestionController.clear();
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = e.toString();
+          });
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
+    } else {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Please enter a question or an answer.';
+      });
     }
   }
 
@@ -290,28 +313,39 @@ class _QuestionAskingPageState extends State<QuestionAskingPage> with TickerProv
                         ),
                       ],
                       const SizedBox(height: 20),
-                      GestureDetector(
-                        onTapDown: (_) => _buttonAnimationController.forward(),
-                        onTapUp: (_) => _buttonAnimationController.reverse(),
-                        onTapCancel: () => _buttonAnimationController.reverse(),
-                        onTap: _submit,
-                        child: AnimatedBuilder(
-                          animation: _buttonScaleAnimation,
-                          builder: (context, child) {
-                            return Transform.scale(
-                              scale: _buttonScaleAnimation.value,
-                              child: ElevatedButton(
-                                onPressed: _submit,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: theme.colorScheme.secondary,
-                                  foregroundColor: theme.colorScheme.onSecondary,
-                                ),
-                                child: Text(widget.questionToAnswer == null ? 'Submit Question' : 'Submit Answer'),
-                              ),
-                            );
-                          },
+                      if (_errorMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16.0),
+                          child: Text(
+                            _errorMessage!,
+                            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error),
+                            textAlign: TextAlign.center,
+                          ),
                         ),
-                      ),
+                      _isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : GestureDetector(
+                              onTapDown: (_) => _buttonAnimationController.forward(),
+                              onTapUp: (_) => _buttonAnimationController.reverse(),
+                              onTapCancel: () => _buttonAnimationController.reverse(),
+                              onTap: _submit,
+                              child: AnimatedBuilder(
+                                animation: _buttonScaleAnimation,
+                                builder: (context, child) {
+                                  return Transform.scale(
+                                    scale: _buttonScaleAnimation.value,
+                                    child: ElevatedButton(
+                                      onPressed: _submit,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: theme.colorScheme.secondary,
+                                        foregroundColor: theme.colorScheme.onSecondary,
+                                      ),
+                                      child: Text(widget.questionToAnswer == null ? 'Submit Question' : 'Submit Answer'),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
                     ],
                   ),
                 ),

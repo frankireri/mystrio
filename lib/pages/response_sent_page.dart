@@ -4,8 +4,9 @@ import 'package:mystrio/pages/question_selection_page.dart'; // To navigate to c
 
 class ResponseSentPage extends StatelessWidget {
   final String username; // The username of the person who received the answer
+  final bool isAnonymous;
 
-  const ResponseSentPage({super.key, required this.username});
+  const ResponseSentPage({super.key, required this.username, this.isAnonymous = false});
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +26,7 @@ class ResponseSentPage extends StatelessWidget {
               ),
               const SizedBox(height: 30),
               Text(
-                'Your anonymous response has been sent!',
+                isAnonymous ? 'Your anonymous question has been sent!' : 'Your anonymous response has been sent!',
                 style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),

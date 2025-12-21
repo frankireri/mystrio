@@ -5,9 +5,7 @@ import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/premium_service.dart';
 import 'package:mystrio/services/question_style_service.dart';
 import 'package:mystrio/pages/inbox_page.dart';
-import 'package:mystrio/pages/question_asking_page.dart';
 import 'package:mystrio/pages/owner_profile_page.dart';
-import 'package:mystrio/pages/landing_page.dart';
 import 'package:mystrio/pages/signup_page.dart';
 import 'package:mystrio/pages/login_page.dart';
 import 'package:mystrio/pages/post_submit_page.dart';
@@ -18,8 +16,6 @@ import 'package:mystrio/pages/create_quiz_page.dart';
 import 'package:mystrio/pages/quiz_page.dart';
 import 'package:mystrio/pages/game_selection_page.dart';
 import 'package:mystrio/gratitude_provider.dart';
-// import 'package:mystrio/pages/gratitude_page.dart'; // Removed direct import
-import 'package:mystrio/pages/main_tab_page.dart';
 import 'package:mystrio/services/gratitude_theme_service.dart';
 import 'package:mystrio/services/theme_service.dart';
 import 'package:mystrio/pages/my_quizzes_page.dart';
@@ -29,9 +25,10 @@ import 'dart:async';
 import 'package:mystrio/pages/public_profile_page.dart';
 import 'package:mystrio/services/user_question_service.dart';
 import 'package:mystrio/pages/my_cards_page.dart';
-import 'package:mystrio/pages/shared_question_landing_page.dart'; // Import the new landing page
+import 'package:mystrio/api/mystrio_api.dart';
+import 'package:mystrio/inbox_provider.dart';
+import 'package:mystrio/pages/answered_question_detail_page.dart';
 
-// Placeholder for Coming Soon feature
 class ComingSoonPage extends StatelessWidget {
   final String featureName;
   const ComingSoonPage({super.key, required this.featureName});
@@ -65,26 +62,50 @@ class ComingSoonPage extends StatelessWidget {
 }
 
 void main() {
-  Provider.debugCheckInvalidValueType = null; // Temporarily disable Provider type checking
   runApp(
     MultiProvider(
       providers: [
+        Provider(create: (context) => MystrioApi()),
         ChangeNotifierProvider(create: (context) => AuthService()),
         ChangeNotifierProvider(create: (context) => PremiumService()),
         ChangeNotifierProvider(create: (context) => QuestionStyleService()),
-        ChangeNotifierProvider(create: (context) => UserQuestionService()), // UserQuestionService is ChangeNotifier
-        ChangeNotifierProxyProvider<AuthService, QuestionProvider>(
-          create: (context) => QuestionProvider(),
-          update: (context, authService, questionProvider) {
-            questionProvider!.setAuthService(authService);
-            return questionProvider;
+        ChangeNotifierProxyProvider<AuthService, UserQuestionService>(
+          create: (context) => UserQuestionService(
+            Provider.of<MystrioApi>(context, listen: false),
+          ),
+          update: (context, auth, service) {
+            service!.setAuthService(auth);
+            return service;
           },
         ),
-        ChangeNotifierProxyProvider<UserQuestionService, QuizProvider>( // Provide UserQuestionService to QuizProvider
+        ChangeNotifierProxyProvider2<AuthService, UserQuestionService, QuestionProvider>(
+          create: (context) => QuestionProvider(),
+          update: (context, auth, userQuestionService, provider) {
+            provider!
+              ..setAuthService(auth)
+              ..setUserQuestionService(userQuestionService);
+            return provider;
+          },
+        ),
+        ChangeNotifierProxyProvider2<AuthService, UserQuestionService, QuizProvider>(
           create: (context) => QuizProvider(),
-          update: (context, userQuestionService, quizProvider) {
-            quizProvider!.setUserQuestionService(userQuestionService);
+          update: (context, authService, userQuestionService, quizProvider) {
+            quizProvider!
+              ..setAuthService(authService)
+              ..setUserQuestionService(userQuestionService);
             return quizProvider;
+          },
+        ),
+        ChangeNotifierProxyProvider3<AuthService, UserQuestionService, PremiumService, InboxProvider>(
+          create: (context) => InboxProvider(
+            Provider.of<MystrioApi>(context, listen: false),
+          ),
+          update: (context, auth, userQuestionService, premiumService, inboxProvider) {
+            inboxProvider!
+              ..setAuthService(auth)
+              ..setUserQuestionService(userQuestionService)
+              ..setPremiumService(premiumService);
+            return inboxProvider;
           },
         ),
         ChangeNotifierProvider(create: (context) => GratitudeProvider()),
@@ -123,50 +144,39 @@ class _MyAppState extends State<MyApp> {
     _appLinks = AppLinks();
 
     final initialLink = await _appLinks.getInitialLink();
-    _handleLink(initialLink);
+    if (initialLink != null) {
+      _handleLink(initialLink);
+    }
 
     _linkSubscription = _appLinks.uriLinkStream.listen((Uri? link) {
       _handleLink(link);
-    }, onError: (err) {
-      // Handle exception
     });
   }
 
   void _handleLink(Uri? link) {
     if (link == null) return;
 
-    if (link.pathSegments.isNotEmpty && link.pathSegments.first == 'profile') {
-      final username = link.pathSegments[1];
-      String? questionCode;
-      if (link.pathSegments.length > 2) {
-        questionCode = link.pathSegments[2];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (link.pathSegments.isNotEmpty && link.pathSegments.first == 'profile') {
+        final username = link.pathSegments[1];
+        bool isAskingAnonymous = false;
+
+        if (link.pathSegments.length > 2) {
+          if (link.pathSegments[2] == 'ask') {
+            isAskingAnonymous = true;
+          }
+        }
+        
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => PublicProfilePage(
+              username: username,
+              isAskingAnonymous: isAskingAnonymous,
+            ),
+          ),
+        );
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (questionCode != null) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => SharedQuestionLandingPage(username: username, questionCode: questionCode!),
-            ),
-          );
-        } else {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => PublicProfilePage(username: username),
-            ),
-          );
-        }
-      });
-    } else if (link.pathSegments.isNotEmpty && link.pathSegments.first == 'quiz') {
-      final username = link.pathSegments.last;
-      final quizId = link.queryParameters['id'];
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (quizId != null) {
-          Navigator.of(context).pushReplacementNamed('/quiz/$username?id=$quizId');
-        } else {
-          Navigator.of(context).pushReplacementNamed('/quiz/$username');
-        }
-      });
-    }
+    });
   }
 
   @override
@@ -186,66 +196,97 @@ class _MyAppState extends State<MyApp> {
             '/login': (context) => const LoginPage(),
             '/post-submit': (context) => const PostSubmitPage(username: 'default'),
             '/create-quiz': (context) => const CreateQuizPage(),
-            '/gratitude': (context) => const ComingSoonPage(featureName: 'Gratitude Jar'), // Muted
+            '/gratitude': (context) => const ComingSoonPage(featureName: 'Gratitude Jar'),
             '/my-quizzes': (context) => const MyQuizzesPage(),
             '/home-dashboard': (context) => const HomeDashboardPage(),
           },
           onGenerateRoute: (settings) {
-            if (settings.name != null && settings.name!.startsWith('/profile/')) {
-              final uri = Uri.parse(settings.name!);
-              final username = uri.pathSegments[1];
-              String? questionCode;
-              if (uri.pathSegments.length > 2) {
-                questionCode = uri.pathSegments[2];
-              }
-              if (questionCode != null) {
-                return MaterialPageRoute(
-                  builder: (context) => SharedQuestionLandingPage(username: username, questionCode: questionCode!),
-                );
-              }
-              return MaterialPageRoute(
-                builder: (context) => PublicProfilePage(username: username),
-              );
-            }
-            if (settings.name != null && settings.name!.startsWith('/select-question/')) {
-              final username = settings.name!.split('/').last;
-              return MaterialPageRoute(
-                builder: (context) => QuestionSelectionPage(username: username),
-              );
-            }
-            if (settings.name != null && settings.name!.startsWith('/quiz/')) {
-              final uri = Uri.parse(settings.name!);
-              final username = uri.pathSegments.last;
-              final quizId = uri.queryParameters['id'];
-              if (quizId != null) {
-                return MaterialPageRoute(
-                  builder: (context) => QuizPage(username: username, quizId: quizId),
-                );
-              }
-            }
-            if (settings.name != null && settings.name!.startsWith('/game-selection/')) {
-              final username = settings.name!.split('/').last;
-              return MaterialPageRoute(
-                builder: (context) => GameSelectionPage(
-                  username: username,
-                  isNewUser: true,
-                ),
-              );
-            }
-            if (settings.name != null && settings.name!.startsWith('/my-cards/')) {
-              final username = settings.name!.split('/').last;
-              return MaterialPageRoute(
-                builder: (context) => MyCardsPage(username: username),
-              );
-            }
+            if (settings.name == null) return null;
+            final uri = Uri.parse(settings.name!);
 
-            return MaterialPageRoute(
-              builder: (context) => const Scaffold(
-                body: Center(
-                  child: Text('Page not found'),
-                ),
-              ),
-            );
+            if (uri.pathSegments.isNotEmpty) {
+              switch (uri.pathSegments.first) {
+                case 'profile':
+                  if (uri.pathSegments.length > 1) {
+                    final username = uri.pathSegments[1];
+                    bool isAskingAnonymous = uri.pathSegments.length > 2 && uri.pathSegments[2] == 'ask';
+                    return MaterialPageRoute(
+                      builder: (context) => PublicProfilePage(username: username, isAskingAnonymous: isAskingAnonymous),
+                    );
+                  }
+                  break;
+                case 'answered-q': // NEW: Handle answered question deep links
+                  if (uri.pathSegments.length > 1) {
+                    final shortCode = uri.pathSegments[1];
+                    return MaterialPageRoute(
+                      builder: (context) => FutureBuilder<AnsweredQuestion?>(
+                        future: Provider.of<UserQuestionService>(context, listen: false).getAnsweredQuestionByShortCode(shortCode),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+                          } else if (snapshot.hasError) {
+                            return Scaffold(body: Center(child: Text('Error loading answered question: ${snapshot.error}')));
+                          } else if (!snapshot.hasData || snapshot.data == null) {
+                            return const Scaffold(body: Center(child: Text('Answered question not found.')));
+                          }
+                          final answeredQuestion = snapshot.data!;
+                          // Need to find the username associated with this answered question
+                          return FutureBuilder<String?>(
+                            future: Provider.of<UserQuestionService>(context, listen: false).getUsernameById(answeredQuestion.userId),
+                            builder: (context, usernameSnapshot) {
+                              if (usernameSnapshot.connectionState == ConnectionState.waiting) {
+                                return const Scaffold(body: Center(child: CircularProgressIndicator()));
+                              } else if (usernameSnapshot.hasError) {
+                                return Scaffold(body: Center(child: Text('Error loading username: ${usernameSnapshot.error}')));
+                              } else if (!usernameSnapshot.hasData || usernameSnapshot.data == null) {
+                                return const Scaffold(body: Center(child: Text('Username not found.')));
+                              }
+                              return AnsweredQuestionDetailPage(answeredQuestion: answeredQuestion, username: usernameSnapshot.data!);
+                            },
+                          );
+                        },
+                      ),
+                    );
+                  }
+                  break;
+                case 'select-question':
+                  if (uri.pathSegments.length > 1) {
+                    final username = uri.pathSegments[1];
+                    return MaterialPageRoute(
+                      builder: (context) => QuestionSelectionPage(username: username),
+                    );
+                  }
+                  break;
+                case 'quiz':
+                  if (uri.pathSegments.length > 1) {
+                    final username = uri.pathSegments[1];
+                    final quizId = uri.queryParameters['id'];
+                    if (quizId != null) {
+                      return MaterialPageRoute(
+                        builder: (context) => QuizPage(username: username, quizId: quizId),
+                      );
+                    }
+                  }
+                  break;
+                case 'game-selection':
+                  if (uri.pathSegments.length > 1) {
+                    final username = uri.pathSegments[1];
+                    return MaterialPageRoute(
+                      builder: (context) => GameSelectionPage(username: username, isNewUser: true),
+                    );
+                  }
+                  break;
+                case 'my-cards':
+                  if (uri.pathSegments.length > 1) {
+                    final username = uri.pathSegments[1];
+                    return MaterialPageRoute(
+                      builder: (context) => MyCardsPage(username: username),
+                    );
+                  }
+                  break;
+              }
+            }
+            return MaterialPageRoute(builder: (context) => const Scaffold(body: Center(child: Text('Page not found'))));
           },
         );
       },
@@ -253,81 +294,58 @@ class _MyAppState extends State<MyApp> {
   }
 
   ThemeData _buildLightTheme() {
-    final base = ThemeData.light();
+    final base = ThemeData.light(useMaterial3: true);
     return base.copyWith(
-      useMaterial3: true,
       scaffoldBackgroundColor: Colors.white,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.deepPurple, // Primary brand color
+        seedColor: Colors.deepPurple,
         brightness: Brightness.light,
         primary: Colors.deepPurple,
         onPrimary: Colors.white,
-        secondary: Colors.pinkAccent, // Accent color
+        secondary: Colors.pinkAccent,
         onSecondary: Colors.white,
         surface: Colors.white,
         onSurface: Colors.black87,
-        background: Colors.grey.shade100,
-        onBackground: Colors.black87,
         error: Colors.red.shade700,
         onError: Colors.white,
+      ).copyWith(
+        background: Colors.grey.shade100,
+        onBackground: Colors.black87,
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
-        titleTextStyle: TextStyle(
-          fontFamily: 'Poppins',
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
+        titleTextStyle: TextStyle(fontFamily: 'Poppins', fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
       ),
       textTheme: _buildLightTextTheme(base.textTheme),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.deepPurple,
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          textStyle: const TextStyle(
-            fontFamily: 'Poppins',
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
+          textStyle: const TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.bold, fontSize: 16),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: Colors.deepPurple,
-          textStyle: const TextStyle(
-            fontFamily: 'Poppins',
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
+          textStyle: const TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.w600, fontSize: 14),
         ),
       ),
-      cardTheme: base.cardTheme.copyWith( // Use copyWith
+      cardTheme: base.cardTheme.copyWith(
         elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         color: Colors.white,
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.grey.shade200,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.deepPurple, width: 2)),
         labelStyle: TextStyle(color: Colors.grey.shade700),
         hintStyle: TextStyle(color: Colors.grey.shade500),
       ),
@@ -362,81 +380,57 @@ class _MyAppState extends State<MyApp> {
   }
 
   ThemeData _buildDarkTheme() {
-    final base = ThemeData.dark();
+    final base = ThemeData.dark(useMaterial3: true);
     return base.copyWith(
-      useMaterial3: true,
       scaffoldBackgroundColor: Colors.black,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.deepPurple, // Primary brand color
+        seedColor: Colors.deepPurple,
         brightness: Brightness.dark,
         primary: Colors.deepPurple.shade300,
         onPrimary: Colors.black,
-        secondary: Colors.pinkAccent.shade100, // Accent color
+        secondary: Colors.pinkAccent.shade100,
         onSecondary: Colors.black,
         surface: Colors.grey.shade900,
-        onSurface: Colors.white70,
-        background: Colors.black,
-        onBackground: Colors.white70,
         error: Colors.red.shade400,
         onError: Colors.black,
+      ).copyWith(
+        background: Colors.black,
+        onBackground: Colors.white70,
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.grey.shade900,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
-        titleTextStyle: const TextStyle(
-          fontFamily: 'Poppins',
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
+        titleTextStyle: const TextStyle(fontFamily: 'Poppins', fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
       ),
       textTheme: _buildDarkTextTheme(base.textTheme),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.deepPurple.shade300,
           foregroundColor: Colors.black,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          textStyle: const TextStyle(
-            fontFamily: 'Poppins',
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
+          textStyle: const TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.bold, fontSize: 16),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: Colors.deepPurple.shade300,
-          textStyle: const TextStyle(
-            fontFamily: 'Poppins',
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
+          textStyle: const TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.w600, fontSize: 14),
         ),
       ),
-      cardTheme: base.cardTheme.copyWith( // Use copyWith
+      cardTheme: base.cardTheme.copyWith(
         elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         color: Colors.grey.shade800,
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.grey.shade700,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.deepPurpleAccent, width: 2),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.deepPurpleAccent, width: 2)),
         labelStyle: TextStyle(color: Colors.grey.shade300),
         hintStyle: TextStyle(color: Colors.grey.shade500),
       ),

@@ -4,6 +4,7 @@ class CustomAppBar extends StatefulWidget implements PreferredSizeWidget {
   final String title;
   final List<Widget> actions;
   final Color? backgroundColor;
+  final double? elevation;
   final PreferredSizeWidget? bottom;
 
   const CustomAppBar({
@@ -11,6 +12,7 @@ class CustomAppBar extends StatefulWidget implements PreferredSizeWidget {
     required this.title,
     this.actions = const [],
     this.backgroundColor,
+    this.elevation,
     this.bottom,
   });
 
@@ -84,7 +86,7 @@ class _CustomAppBarState extends State<CustomAppBar> with SingleTickerProviderSt
         ),
       ],
       backgroundColor: effectiveBackgroundColor,
-      elevation: 0,
+      elevation: widget.elevation ?? 0,
       iconTheme: IconThemeData(color: foregroundColor), // Apply foreground color to back button
       bottom: widget.bottom,
     );

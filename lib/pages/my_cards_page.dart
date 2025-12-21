@@ -4,23 +4,54 @@ import 'package:mystrio/services/user_question_service.dart';
 import 'package:mystrio/services/question_style_service.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:mystrio/pages/shared_question_landing_page.dart'; // Import SharedQuestionLandingPage
-import 'package:flutter/foundation.dart'; // For debugPrint
+import 'package:mystrio/pages/shared_question_landing_page.dart';
+import 'package:flutter/foundation.dart';
 
-class MyCardsPage extends StatelessWidget {
+class MyCardsPage extends StatefulWidget {
   final String username;
 
   const MyCardsPage({super.key, required this.username});
 
   @override
-  Widget build(BuildContext context) {
-    debugPrint('MyCardsPage: Building for username: $username');
-    final userQuestionService = Provider.of<UserQuestionService>(context);
-    final questionStyleService = Provider.of<QuestionStyleService>(context);
-    final allQuestions = userQuestionService.getAllQuestions();
-    final theme = Theme.of(context);
+  State<MyCardsPage> createState() => _MyCardsPageState();
+}
 
-    debugPrint('MyCardsPage: Found ${allQuestions.length} questions in service.');
+class _MyCardsPageState extends State<MyCardsPage> {
+  Future<List<Map<String, dynamic>>>? _cardsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCards();
+  }
+
+  void _loadCards() {
+    final userQuestionService = Provider.of<UserQuestionService>(context, listen: false);
+    setState(() {
+      _cardsFuture = userQuestionService.getAllQuestionCards();
+    });
+  }
+
+  Future<void> _deleteCard(String code) async {
+    final userQuestionService = Provider.of<UserQuestionService>(context, listen: false);
+    final success = await userQuestionService.deleteQuestionCard(code);
+    if (success) {
+      _loadCards();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Card deleted successfully!')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to delete card.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    debugPrint('MyCardsPage: Building for username: ${widget.username}');
+    final questionStyleService = Provider.of<QuestionStyleService>(context);
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: CustomAppBar(
@@ -29,21 +60,31 @@ class MyCardsPage extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.share),
             onPressed: () {
-              final shareLink = 'https://mystrio.app/profile/$username';
+              final shareLink = 'https://mystrio.app/profile/${widget.username}';
               Share.share('Check out my profile on Mystrio! $shareLink');
             },
           ),
         ],
       ),
-      body: allQuestions.isEmpty
-          ? const Center(child: Text('You haven\'t created any question cards yet.'))
-          : ListView.builder(
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _cardsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('You haven\'t created any question cards yet.'));
+          } else {
+            final allQuestions = snapshot.data!;
+            debugPrint('MyCardsPage: Found ${allQuestions.length} questions in service.');
+            return ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: allQuestions.length,
               itemBuilder: (context, index) {
                 final questionData = allQuestions[index];
                 final style = questionStyleService.getStyleById(questionData['styleId']!);
-                final questionCode = questionData['code']; // Assuming 'code' is stored in questionData
+                final questionCode = questionData['code'];
 
                 debugPrint('MyCardsPage: Displaying card for question: ${questionData['questionText']} with code: $questionCode');
 
@@ -72,32 +113,68 @@ class MyCardsPage extends StatelessWidget {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            // Simulate sharing and then navigating to the landing page for this specific card
-                            final specificShareLink = 'https://mystrio.app/profile/$username/$questionCode';
-                            Share.share('Answer my question on Mystrio! $specificShareLink');
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                final specificShareLink = 'https://mystrio.app/profile/${widget.username}/$questionCode';
+                                Share.share('Answer my question on Mystrio! $specificShareLink');
 
-                            // Navigate to the shared question landing page
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => SharedQuestionLandingPage(
-                                  username: username,
-                                  questionCode: questionCode!, // Pass the specific question code
-                                ),
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => SharedQuestionLandingPage(
+                                      username: widget.username,
+                                      questionCode: questionCode!,
+                                    ),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.share),
+                              label: const Text('Share'),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Delete Card'),
+                                    content: const Text('Are you sure you want to delete this card?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                          _deleteCard(questionCode!);
+                                        },
+                                        child: const Text('Delete'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.delete),
+                              label: const Text('Delete'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
                               ),
-                            );
-                          },
-                          icon: const Icon(Icons.share),
-                          label: const Text('Share This Card'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                 );
               },
-            ),
+            );
+          }
+        },
+      ),
     );
   }
 }

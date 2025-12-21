@@ -1,98 +1,85 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:mystrio/question_provider.dart';
-import 'package:mystrio/auth_service.dart';
-import 'package:mystrio/services/question_style_service.dart';
-import 'package:mystrio/models/question.dart'; // Import the Question model
+import 'package:mystrio/services/user_question_service.dart'; // Import for AnsweredQuestion
 
+// MODIFIED: This widget is now more generic and reusable.
 class ShareableStoryCard extends StatelessWidget {
-  final Question question;
+  final AnsweredQuestion question;
   final String username;
+  final List<Color> gradientColors; // NEW
 
   const ShareableStoryCard({
     super.key,
     required this.question,
     required this.username,
+    required this.gradientColors, // NEW
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final authService = Provider.of<AuthService>(context);
-    final questionStyleService = Provider.of<QuestionStyleService>(context);
-
-    // Get the chosen question and style for the profile owner
-    final String displayQuestionText = authService.chosenQuestionText ?? question.questionText;
-    final QuestionStyle chosenStyle = questionStyleService.getStyleById(authService.chosenQuestionStyleId ?? 'default');
+    final effectiveGradient = LinearGradient(
+      colors: gradientColors, // Use the provided colors
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
 
     return Container(
-      width: 300, // Standard story size width
-      height: 500, // Standard story size height
+      width: 350, // A good width for social media story posts
+      height: 600, // A good height for social media story posts
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: theme.colorScheme.secondary, width: 2),
-        color: Colors.black, // Fallback background
+        gradient: effectiveGradient,
       ),
-      child: Column(
-        children: [
-          // Top part with gradient
-          Expanded(
-            flex: 2, // Takes 2/3 of the space
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-                gradient: LinearGradient(
-                  colors: chosenStyle.gradientColors,
-                  begin: chosenStyle.begin,
-                  end: chosenStyle.end,
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                'Q: $displayQuestionText',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Anonymous Question Part
+            Text(
+              'Anonymous asked:',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: Colors.white.withOpacity(0.8),
               ),
             ),
-          ),
-          // Bottom part in white
-          Expanded(
-            flex: 1, // Takes 1/3 of the space
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
+            const SizedBox(height: 8),
+            Text(
+              question.questionText,
+              style: theme.textTheme.headlineSmall?.copyWith(
                 color: Colors.white,
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(18)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      'A: ${question.answerText ?? 'Not answered yet...'}',
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: Colors.black87, // Dark text on white background
-                      ),
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Text(
-                      '@$username on Mystrio',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[600], // Subtle branding
-                      ),
-                    ),
-                  ),
-                ],
+                fontWeight: FontWeight.w500,
+                fontStyle: FontStyle.italic,
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 40),
+            // The User's Answer Part
+            Text(
+              'I answered:',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: Colors.white.withOpacity(0.8),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              question.answerText,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Spacer(),
+            // Footer with app branding
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Text(
+                'Answered by @$username on Mystrio',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withOpacity(0.7),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

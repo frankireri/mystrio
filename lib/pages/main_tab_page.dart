@@ -4,7 +4,9 @@ import 'package:mystrio/pages/game_selection_page.dart';
 import 'package:mystrio/pages/owner_profile_page.dart';
 import 'package:provider/provider.dart';
 import 'package:mystrio/auth_service.dart';
-import 'package:mystrio/pages/login_page.dart'; // Import LoginPage
+import 'package:mystrio/pages/login_page.dart';
+import 'package:mystrio/question_provider.dart';
+import 'package:mystrio/quiz_provider.dart';
 
 class MainTabPage extends StatefulWidget {
   final int initialIndex;
@@ -18,16 +20,29 @@ class MainTabPage extends StatefulWidget {
 class _MainTabPageState extends State<MainTabPage> {
   late int _selectedIndex;
   late final List<Widget> _pages;
-  // Using a static variable or a more persistent storage (like SharedPreferences)
-  // would be needed if you want this to persist across app restarts.
-  // For now, it's once per app session.
-  static bool _hasShownSignInPromptThisSession = false; 
+  static bool _hasShownSignInPromptThisSession = false;
+  
+  late AuthService _authService;
+  late QuestionProvider _questionProvider;
+  late QuizProvider _quizProvider;
+  bool _initialDataFetched = false; // Flag to ensure data is fetched only once after auth
 
   @override
   void initState() {
     super.initState();
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final username = authService.username ?? 'user';
+    _authService = Provider.of<AuthService>(context, listen: false);
+    _questionProvider = Provider.of<QuestionProvider>(context, listen: false);
+    _quizProvider = Provider.of<QuizProvider>(context, listen: false);
+
+    _authService.addListener(_onAuthServiceChanged);
+
+    // Initial check in case authService is already ready (e.g., hot restart)
+    // Defer this call to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onAuthServiceChanged();
+    });
+
+    final username = _authService.username ?? 'user';
 
     _pages = <Widget>[
       const InboxPage(),
@@ -43,12 +58,41 @@ class _MainTabPageState extends State<MainTabPage> {
     }
     _selectedIndex = newInitialIndex;
 
-    // Show sign-in prompt if user is a guest and it hasn't been shown yet this session
-    if (!authService.hasPermanentAccount && !_hasShownSignInPromptThisSession) {
+    if (!_authService.hasPermanentAccount && !_hasShownSignInPromptThisSession) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showSignInDialog(context);
-        _hasShownSignInPromptThisSession = true; // Mark as shown for this session
+        _hasShownSignInPromptThisSession = true;
       });
+    }
+  }
+
+  @override
+  void dispose() {
+    _authService.removeListener(_onAuthServiceChanged);
+    super.dispose();
+  }
+
+  void _onAuthServiceChanged() {
+    debugPrint('MainTabPage: _onAuthServiceChanged triggered.');
+    debugPrint('  isLoading: ${_authService.isLoading}');
+    debugPrint('  isFullyAuthenticated: ${_authService.isFullyAuthenticated}');
+    debugPrint('  authToken: ${_authService.authToken != null ? "present" : "null"}');
+    debugPrint('  _initialDataFetched: $_initialDataFetched');
+
+    // Only fetch if authService is not loading, is fully authenticated,
+    // and we haven't fetched the initial data yet.
+    if (!_authService.isLoading && _authService.isFullyAuthenticated && !_initialDataFetched) {
+      debugPrint('MainTabPage: Fetching initial data (questions and quizzes).');
+      // Defer fetching to avoid setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _questionProvider.fetchQuestions();
+        _quizProvider.fetchQuizzes();
+      });
+      _initialDataFetched = true; // Mark as fetched
+    } else if (!_authService.isFullyAuthenticated) {
+      // If user logs out, reset the flag so data can be fetched again on next login
+      debugPrint('MainTabPage: User not fully authenticated, resetting _initialDataFetched.');
+      _initialDataFetched = false;
     }
   }
 
@@ -64,13 +108,13 @@ class _MainTabPageState extends State<MainTabPage> {
             TextButton(
               child: const Text('Later'),
               onPressed: () {
-                Navigator.of(context).pop(); // Dismiss dialog
+                Navigator.of(context).pop();
               },
             ),
             ElevatedButton(
               child: const Text('Sign In / Sign Up'),
               onPressed: () {
-                Navigator.of(context).pop(); // Dismiss dialog
+                Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (context) => const LoginPage()),
                 );

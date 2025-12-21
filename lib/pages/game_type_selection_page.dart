@@ -3,6 +3,10 @@ import 'package:provider/provider.dart';
 import 'package:mystrio/pages/create_quiz_page.dart';
 import 'package:mystrio/quiz_provider.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
+import 'package:mystrio/auth_service.dart';
+import 'package:flutter/foundation.dart';
+import 'package:mystrio/pages/login_page.dart';
+import 'package:mystrio/pages/signup_page.dart';
 
 class GameTypeSelectionPage extends StatelessWidget {
   const GameTypeSelectionPage({super.key});
@@ -12,10 +16,10 @@ class GameTypeSelectionPage extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Name Your Quiz'),
+        title: const Text('Name Your Quiz'),
         content: TextField(
           controller: nameController,
-          decoration: InputDecoration(hintText: 'e.g., "How well do you know me?"'),
+          decoration: const InputDecoration(hintText: 'e.g., "How well do you know me?"'),
         ),
         actions: [
           TextButton(
@@ -23,20 +27,64 @@ class GameTypeSelectionPage extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               if (nameController.text.isNotEmpty) {
-                Provider.of<QuizProvider>(context, listen: false).createNewQuiz(nameController.text, gameType: gameType);
+                final authService = Provider.of<AuthService>(context, listen: false);
+                debugPrint('GameTypeSelectionPage: Auth token before createNewQuiz: ${authService.authToken}');
+                
+                final success = await Provider.of<QuizProvider>(context, listen: false).createNewQuiz(nameController.text, gameType: gameType);
                 Navigator.pop(context); // Close dialog
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const CreateQuizPage()),
-                );
+
+                if (success) {
+                  if (!authService.isFullyAuthenticated) {
+                    _showLoginPrompt(context);
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const CreateQuizPage()),
+                    );
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Failed to create quiz. Please try again.')),
+                  );
+                }
               }
             },
             child: const Text('Create'),
           ),
         ],
       ),
+    );
+  }
+
+  void _showLoginPrompt(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Save Your Quiz!'),
+          content: const Text(
+              'Create an account or log in to save your quiz and view results.'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Later'),
+              onPressed: () {
+                Navigator.of(context).pop(); // Dismiss dialog
+              },
+            ),
+            ElevatedButton(
+              child: const Text('Sign In / Sign Up'),
+              onPressed: () {
+                Navigator.of(context).pop(); // Dismiss dialog
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                );
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 

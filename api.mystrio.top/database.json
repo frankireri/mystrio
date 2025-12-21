@@ -1,0 +1,16 @@
+{
+  "dev": {
+    "driver": "mysql",
+    "host": "localhost",
+    "user": "root",
+    "password": "your_actual_root_password",
+    "database": "mystrio_test"
+  },
+  "prod": {
+    "driver": "mysql",
+    "host": "localhost",
+    "user": "mystrio",
+    "password": "@Franko09",
+    "database": "mystrio"
+  }
+}

@@ -1,0 +1,2 @@
+ALTER TABLE questions
+ADD COLUMN sender_hint VARCHAR(255) DEFAULT NULL;

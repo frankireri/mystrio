@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:mystrio/api/mystrio_api.dart'; // Import the new API client
 import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/models/question.dart'; // Import the new Question model
+import 'package:mystrio/services/user_question_service.dart';
 
 class QuestionProvider with ChangeNotifier {
   final MystrioApi _api = MystrioApi(); // Use the new API client
   late AuthService _authService;
+  late UserQuestionService _userQuestionService;
 
   List<Question> _questions = [];
   bool _isLoading = false;
@@ -20,6 +22,10 @@ class QuestionProvider with ChangeNotifier {
 
   void setAuthService(AuthService authService) {
     _authService = authService;
+  }
+
+  void setUserQuestionService(UserQuestionService userQuestionService) {
+    _userQuestionService = userQuestionService;
   }
 
   Future<void> fetchQuestions() async {

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'package:mystrio/services/user_question_service.dart'; // Import UserQuestionService
+import 'package:mystrio/api/mystrio_api.dart';
+import 'package:mystrio/auth_service.dart';
+import 'package:mystrio/services/user_question_service.dart';
+import 'package:flutter/foundation.dart'; // Import for debugPrint
 
 class QuizQuestion {
   String question;
@@ -15,32 +16,16 @@ class QuizQuestion {
   });
 
   Map<String, dynamic> toJson() => {
-        'question': question,
-        'answers': answers,
-        'correctAnswerIndex': correctAnswerIndex,
+        'question_text': question,
+        'options': answers,
+        'correct_option_index': correctAnswerIndex,
       };
 
-  factory QuizQuestion.fromJson(Map<String, dynamic> json) {
-    List<String> answers;
-    int correctAnswerIndex = json['correctAnswerIndex'] ?? 0;
-
-    if (json.containsKey('answers')) {
-      answers = List<String>.from(json['answers']);
-    } else if (json.containsKey('correctAnswer')) {
-      answers = [
-        json['correctAnswer'],
-        ...(json['dummyAnswers'] as List<dynamic>).cast<String>(),
-      ];
-    } else {
-      answers = ['Default Answer 1', 'Default Answer 2', 'Default Answer 3'];
-    }
-
-    return QuizQuestion(
-      question: json['question'] ?? 'Default Question',
-      answers: answers,
-      correctAnswerIndex: correctAnswerIndex,
-    );
-  }
+  factory QuizQuestion.fromJson(Map<String, dynamic> json) => QuizQuestion(
+        question: json['question_text'] ?? json['question'],
+        answers: json['options'] != null ? List<String>.from(json['options']) : List<String>.from(json['answers'] ?? []),
+        correctAnswerIndex: json['correct_option_index'] ?? json['correctAnswerIndex'] ?? 0,
+      );
 }
 
 class QuizTheme {
@@ -61,10 +46,7 @@ class LeaderboardEntry {
 
   LeaderboardEntry({required this.username, required this.score});
 
-  Map<String, dynamic> toJson() => {
-        'username': username,
-        'score': score,
-      };
+  Map<String, dynamic> toJson() => {'username': username, 'score': score};
 
   factory LeaderboardEntry.fromJson(Map<String, dynamic> json) => LeaderboardEntry(
         username: json['username'],
@@ -73,8 +55,9 @@ class LeaderboardEntry {
 }
 
 class Quiz {
-  String id; // Unique ID for the quiz
+  String id;
   String name;
+  String? description;
   String selectedThemeName;
   List<QuizQuestion> questions;
   List<LeaderboardEntry> leaderboard;
@@ -82,6 +65,7 @@ class Quiz {
   Quiz({
     required this.id,
     required this.name,
+    this.description,
     required this.selectedThemeName,
     required this.questions,
     required this.leaderboard,
@@ -89,139 +73,176 @@ class Quiz {
 
   Map<String, dynamic> toJson() => {
         'id': id,
-        'name': name,
+        'title': name, // Use 'title' for consistency
+        'description': description,
         'selectedThemeName': selectedThemeName,
         'questions': questions.map((q) => q.toJson()).toList(),
         'leaderboard': leaderboard.map((e) => e.toJson()).toList(),
       };
 
   factory Quiz.fromJson(Map<String, dynamic> json) => Quiz(
-        id: json['id'],
-        name: json['name'],
-        selectedThemeName: json['selectedThemeName'],
-        questions: (json['questions'] as List).map((q) => QuizQuestion.fromJson(q)).toList(),
-        leaderboard: (json['leaderboard'] as List).map((e) => LeaderboardEntry.fromJson(e)).toList(),
+        id: json['id'].toString(),
+        name: json['title'] ?? json['name'] ?? 'Untitled Quiz',
+        description: json['description'],
+        selectedThemeName: json['selectedThemeName'] ?? 'Friendship',
+        questions: (json['questions'] as List? ?? []).map((q) => QuizQuestion.fromJson(q)).toList(),
+        leaderboard: (json['leaderboard'] as List? ?? []).map((e) => LeaderboardEntry.fromJson(e)).toList(),
       );
 }
 
 class QuizProvider with ChangeNotifier {
-  static const _quizzesKey = 'user_quizzes';
+  final MystrioApi _api = MystrioApi();
+  late AuthService _authService;
+  late UserQuestionService _userQuestionService;
 
   List<Quiz> _userQuizzes = [];
-  Quiz? _currentQuiz; // The quiz currently being edited/viewed
-  late UserQuestionService _userQuestionService; // Declare UserQuestionService
+  Quiz? _currentQuiz;
+  bool _isLoading = false;
+
+  List<Quiz> get userQuizzes => _userQuizzes;
+  Quiz? get currentQuiz => _currentQuiz;
+  bool get isLoading => _isLoading;
 
   final List<QuizTheme> _themes = [
     QuizTheme(
       name: 'Friendship',
       gradientColors: [Colors.blue, Colors.lightBlueAccent],
       suggestedQuestions: [
-        QuizQuestion(question: 'What is my favorite movie?', answers: ['The Shawshank Redemption', 'Pulp Fiction', 'Forrest Gump']),
-        QuizQuestion(question: 'What is my biggest fear?', answers: ['Heights', 'Spiders', 'Public Speaking']),
-        QuizQuestion(question: 'Where did we first meet?', answers: ['Coffee Shop', 'School', 'Party']),
-        QuizQuestion(question: 'What\'s my go-to comfort food?', answers: ['Pizza', 'Ice Cream', 'Pasta']),
-        QuizQuestion(question: 'What\'s my dream vacation spot?', answers: ['Maldives', 'Paris', 'Tokyo']),
-        QuizQuestion(question: 'What\'s my favorite season?', answers: ['Autumn', 'Spring', 'Summer']),
-        QuizQuestion(question: 'What\'s my favorite animal?', answers: ['Dog', 'Cat', 'Elephant']),
-        QuizQuestion(question: 'What is my hidden talent?', answers: ['Juggling', 'Singing', 'Magic Tricks']),
-        QuizQuestion(question: 'What is my favorite book?', answers: ['To Kill a Mockingbird', '1984', 'The Great Gatsby']),
-        QuizQuestion(question: 'What is my favorite song?', answers: ['Bohemian Rhapsody', 'Stairway to Heaven', 'Hotel California']),
-      ],
-    ),
-    QuizTheme(
-      name: 'This or That',
-      gradientColors: [Colors.purple, Colors.deepPurpleAccent],
-      suggestedQuestions: [
-        QuizQuestion(question: 'Coffee or Tea?', answers: ['Coffee', 'Tea', 'Both']),
-        QuizQuestion(question: 'Movies or Books?', answers: ['Movies', 'Books', 'Both']),
-        QuizQuestion(question: 'Cats or Dogs?', answers: ['Cats', 'Dogs', 'Both']),
-        QuizQuestion(question: 'Beach or Mountains?', answers: ['Beach', 'Mountains', 'Both']),
-        QuizQuestion(question: 'Sweet or Savory?', answers: ['Sweet', 'Savory', 'Both']),
-        QuizQuestion(question: 'Early Bird or Night Owl?', answers: ['Early Bird', 'Night Owl', 'Neither']),
-        QuizQuestion(question: 'Summer or Winter?', answers: ['Summer', 'Winter', 'Neither']),
-        QuizQuestion(question: 'City or Countryside?', answers: ['City', 'Countryside', 'Both']),
-        QuizQuestion(question: 'Android or iOS?', answers: ['Android', 'iOS', 'Neither']),
-        QuizQuestion(question: 'Pizza or Tacos?', answers: ['Pizza', 'Tacos', 'Both']),
-      ],
-    ),
-    QuizTheme(
-      name: 'Spicy',
-      gradientColors: [Colors.red, Colors.orange],
-      suggestedQuestions: [
-        QuizQuestion(question: 'What is my most embarrassing moment?', answers: ['Tripping on stage', 'Calling teacher "mom"', 'Forgetting lines']),
-        QuizQuestion(question: 'What is my biggest turn-on?', answers: ['Confidence', 'Sense of humor', 'Intelligence']),
-        QuizQuestion(question: 'What\'s my guilty pleasure?', answers: ['Reality TV', 'Bad pop music', 'Eating junk food']),
-        QuizQuestion(question: 'What\'s the naughtiest thing I\'ve ever done?', answers: ['Sneaked out of house', 'Cheated on a test', 'Stole candy']),
-        QuizQuestion(question: 'What\'s my biggest secret crush?', answers: ['Celebrity X', 'Friend Y', 'Teacher Z']),
-        QuizQuestion(question: 'What\'s my most irrational fear?', answers: ['Clowns', 'Balloons', 'Buttons']),
-        QuizQuestion(question: 'What\'s my favorite curse word?', answers: ['F***', 'S***', 'D***']),
-        QuizQuestion(question: 'What is the most adventurous thing I\'ve ever done?', answers: ['Skydiving', 'Bungee jumping', 'Scuba diving']),
-        QuizQuestion(question: 'What is my most controversial opinion?', answers: ['Pineapple on pizza is delicious', 'Cats are better than dogs', 'Star Wars is overrated']),
-        QuizQuestion(question: 'What is my biggest regret?', answers: ['Not traveling more', 'Not learning an instrument', 'Not studying harder']),
-      ],
-    ),
-    QuizTheme(
-      name: 'Work Bestie',
-      gradientColors: [Colors.green, Colors.teal],
-      suggestedQuestions: [
-        QuizQuestion(question: 'What is my go-to coffee order?', answers: ['Latte', 'Espresso', 'Cappuccino']),
-        QuizQuestion(question: 'What is my dream job?', answers: ['Travel Blogger', 'Astronaut', 'Chef']),
-        QuizQuestion(question: 'What\'s my biggest pet peeve at work?', answers: ['Loud chewers', 'Leaving dishes', 'Long meetings']),
-        QuizQuestion(question: 'What\'s my favorite way to de-stress after work?', answers: ['Reading', 'Gym', 'Watching TV']),
-        QuizQuestion(question: 'What\'s my preferred communication method?', answers: ['Slack', 'Email', 'Phone Call']),
-        QuizQuestion(question: 'What\'s my favorite office snack?', answers: ['Granola Bar', 'Chips', 'Fruit']),
-        QuizQuestion(question: 'What\'s my biggest career aspiration?', answers: ['CEO', 'Manager', 'Expert']),
-        QuizQuestion(question: 'What is my most-used emoji?', answers: ['😂', '👍', '❤️']),
-        QuizQuestion(question: 'What is my favorite lunch spot near the office?', answers: ['The Italian place', 'The sandwich shop', 'The sushi place']),
-        QuizQuestion(question: 'What is my biggest work-related accomplishment?', answers: ['Leading a major project', 'Getting a promotion', 'Winning an award']),
+        QuizQuestion(question: 'What is my favorite movie?', answers: ['The Shawshank Redemption', 'Pulp Fiction', 'Forrest Gump', 'The Godfather']),
+        QuizQuestion(question: 'What is my biggest fear?', answers: ['Spiders', 'Heights', 'Public Speaking', 'Clowns']),
+        QuizQuestion(question: 'What is my dream vacation destination?', answers: ['Paris', 'Tokyo', 'Bora Bora', 'Rome']),
+        QuizQuestion(question: 'What is my favorite food?', answers: ['Pizza', 'Sushi', 'Tacos', 'Burgers']),
+        QuizQuestion(question: 'What is my favorite hobby?', answers: ['Reading', 'Gaming', 'Hiking', 'Cooking']),
       ],
     ),
   ];
-
-  List<Quiz> get userQuizzes => _userQuizzes;
-  Quiz? get currentQuiz => _currentQuiz;
   List<QuizTheme> get themes => _themes;
   QuizTheme get selectedQuizTheme => _themes.firstWhere((theme) => theme.name == (_currentQuiz?.selectedThemeName ?? 'Friendship'));
 
-  QuizProvider() {
-    _loadQuizzes();
+  void setAuthService(AuthService authService) {
+    _authService = authService;
+    _authService.addListener(_onAuthServiceChanged);
+    _onAuthServiceChanged(); // Initial check
   }
 
-  // Setter for UserQuestionService
+  void _onAuthServiceChanged() async {
+    if (_authService.isFullyAuthenticated && _authService.pendingQuizName != null) {
+      debugPrint('QuizProvider: Auth service changed, user is authenticated and has pending quiz. Saving...');
+      final success = await createNewQuiz(
+        _authService.pendingQuizName!,
+        gameType: _authService.pendingQuizGameType!,
+      );
+      if (success) {
+        debugPrint('QuizProvider: Pending quiz saved to backend.');
+        _authService.clearPendingQuiz();
+      } else {
+        debugPrint('QuizProvider: Failed to save pending quiz to backend.');
+      }
+    }
+  }
+
   void setUserQuestionService(UserQuestionService service) {
     _userQuestionService = service;
   }
 
-  Future<void> _loadQuizzes() async {
-    final prefs = await SharedPreferences.getInstance();
-    final quizzesString = prefs.getString(_quizzesKey);
-    if (quizzesString != null) {
-      final List<dynamic> jsonList = json.decode(quizzesString);
-      _userQuizzes = jsonList.map((json) => Quiz.fromJson(json)).toList();
+  Future<void> fetchQuizzes() async {
+    if (_authService.authToken == null) {
+      debugPrint('QuizProvider: No auth token available. Cannot fetch quizzes.');
+      return;
     }
+    _isLoading = true;
+    notifyListeners();
+
+    final response = await _api.getQuizzes(_authService.authToken!);
+    if (response['success']) {
+      var data = response['data'];
+      debugPrint('QuizProvider: fetchQuizzes response data type: ${data.runtimeType}');
+      debugPrint('QuizProvider: fetchQuizzes response data: $data');
+
+      // Handle double wrapping: {success: true, data: {success: true, data: [...]}}
+      if (data is Map && data.containsKey('data')) {
+         data = data['data'];
+      }
+
+      if (data is List) {
+        _userQuizzes = data.map((json) => Quiz.fromJson(json)).toList();
+      } else if (data is Map && data.containsKey('quizzes') && data['quizzes'] is List) {
+        // Handle case where list is wrapped in an object like {quizzes: [...]}
+        final quizzesList = data['quizzes'] as List;
+        _userQuizzes = quizzesList.map((json) => Quiz.fromJson(json)).toList();
+      } else {
+         debugPrint('QuizProvider: Error fetching quizzes: response data is not a list or recognized format.');
+        _userQuizzes = [];
+      }
+    } else {
+      debugPrint('QuizProvider: Error fetching quizzes: ${response['message']}');
+      _userQuizzes = [];
+    }
+    _isLoading = false;
     notifyListeners();
   }
 
-  Future<void> _saveQuizzes() async {
-    final prefs = await SharedPreferences.getInstance();
-    final quizzesString = json.encode(_userQuizzes.map((quiz) => quiz.toJson()).toList());
-    await prefs.setString(_quizzesKey, quizzesString);
-  }
+  Future<bool> createNewQuiz(String name, {String gameType = 'Friendship'}) async {
+    debugPrint('QuizProvider: Attempting to create new quiz "$name" with game type "$gameType".');
+    if (_authService.authToken == null) {
+      debugPrint('QuizProvider: createNewQuiz failed - Auth token is null. Storing pending quiz locally.');
+      await _authService.setPendingQuiz(name, gameType);
+      // Create a local mock quiz for immediate display
+      final theme = _themes.firstWhere((t) => t.name == gameType, orElse: () => _themes.first);
+      _currentQuiz = Quiz(
+        id: 'pending_${DateTime.now().millisecondsSinceEpoch}', // Temporary ID
+        name: name,
+        description: '',
+        selectedThemeName: theme.name,
+        questions: theme.suggestedQuestions,
+        leaderboard: [],
+      );
+      notifyListeners();
+      return true;
+    }
+    debugPrint('QuizProvider: Auth token is available.');
 
-  void createNewQuiz(String name, {String gameType = 'Friendship'}) {
     final theme = _themes.firstWhere((t) => t.name == gameType, orElse: () => _themes.first);
-    List<QuizQuestion> initialQuestions = List.from(theme.suggestedQuestions);
+    final newQuizData = {
+      'title': name,
+      'description': 'A new quiz about $gameType!', // Use the gameType in the description
+      'selectedThemeName': theme.name,
+      'questions': theme.suggestedQuestions.map((q) => q.toJson()).toList(),
+    };
+    debugPrint('QuizProvider: Creating quiz payload: $newQuizData');
 
-    _currentQuiz = Quiz(
-      id: DateTime.now().millisecondsSinceEpoch.toString(), // Simple unique ID
-      name: name,
-      selectedThemeName: theme.name,
-      questions: initialQuestions,
-      leaderboard: [],
-    );
-    _userQuizzes.add(_currentQuiz!);
-    _saveQuizzes();
-    notifyListeners();
+    final response = await _api.createQuiz(_authService.authToken!, newQuizData);
+    if (response['success']) {
+      // Handle potential double wrapping in create response as well
+      var responseData = response['data'];
+      if (responseData is Map && responseData.containsKey('data')) {
+        responseData = responseData['data'];
+      }
+
+      final quizId = responseData['quizId'] ?? responseData['id']; // Handle both potential ID fields
+      
+      if (quizId != null) {
+         final newQuiz = Quiz(
+          id: quizId.toString(),
+          name: name,
+          description: newQuizData['description'] as String?, // use the generated description
+          selectedThemeName: theme.name,
+          questions: theme.suggestedQuestions,
+          leaderboard: [],
+        );
+        _userQuizzes.add(newQuiz);
+        _currentQuiz = newQuiz;
+        debugPrint('QuizProvider: Successfully created quiz with ID: ${newQuiz.id}');
+        notifyListeners();
+        return true;
+      } else {
+         debugPrint('QuizProvider: API error creating quiz: Quiz ID missing in response.');
+      }
+    } else {
+      final errorMessage = response['error'] ?? response['message'];
+      debugPrint('QuizProvider: API error creating quiz: $errorMessage');
+    }
+    return false;
   }
 
   void selectQuiz(String quizId) {
@@ -229,45 +250,85 @@ class QuizProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _updateQuizOnBackend() async {
+    if (_currentQuiz == null || _authService.authToken == null) {
+      debugPrint('QuizProvider: Cannot update quiz on backend - currentQuiz or authToken is null.');
+      return;
+    }
+    final response = await _api.updateQuiz(_authService.authToken!, _currentQuiz!.id, _currentQuiz!.toJson());
+    if (!response['success']) {
+      debugPrint('QuizProvider: Error updating quiz on backend: ${response['message']}');
+    }
+    notifyListeners();
+  }
+
   void updateCurrentQuizName(String newName) {
     if (_currentQuiz != null) {
       _currentQuiz!.name = newName;
-      _saveQuizzes();
-      notifyListeners();
+      _updateQuizOnBackend();
+    }
+  }
+
+  void updateCurrentQuizDescription(String newDescription) {
+    if (_currentQuiz != null) {
+      _currentQuiz!.description = newDescription;
+      _updateQuizOnBackend();
     }
   }
 
   void addQuestionToCurrentQuiz(QuizQuestion question) {
     if (_currentQuiz != null) {
       _currentQuiz!.questions.add(question);
-      _saveQuizzes();
-      notifyListeners();
+      _updateQuizOnBackend();
     }
   }
 
   void removeQuestionFromCurrentQuiz(int index) {
     if (_currentQuiz != null) {
       _currentQuiz!.questions.removeAt(index);
-      _saveQuizzes();
-      notifyListeners();
+      _updateQuizOnBackend();
     }
   }
 
   void updateQuestionInCurrentQuiz(int index, QuizQuestion question) {
     if (_currentQuiz != null) {
       _currentQuiz!.questions[index] = question;
-      _saveQuizzes();
-      notifyListeners();
+      _updateQuizOnBackend();
     }
   }
 
-  void addLeaderboardEntryToCurrentQuiz(LeaderboardEntry entry, String quizOwnerUsername) {
-    if (_currentQuiz != null) {
+  Future<void> removeQuiz(String quizId) async {
+    if (_authService.authToken == null) {
+      debugPrint('QuizProvider: Cannot remove quiz - Auth token is null.');
+      return;
+    }
+    final response = await _api.deleteQuiz(_authService.authToken!, quizId);
+    if (response['success']) {
+      _userQuizzes.removeWhere((quiz) => quiz.id == quizId);
+      if (_currentQuiz?.id == quizId) {
+        _currentQuiz = null;
+      }
+      notifyListeners();
+    } else {
+      debugPrint('QuizProvider: API error removing quiz: ${response['message']}');
+    }
+  }
+  
+  Future<void> addLeaderboardEntryToCurrentQuiz(LeaderboardEntry entry, String quizOwnerUsername) async {
+    if (_currentQuiz == null) {
+      debugPrint('QuizProvider: Cannot add leaderboard entry - currentQuiz is null.');
+      return;
+    }
+    if (_authService.authToken == null) {
+      debugPrint('QuizProvider: Cannot add leaderboard entry - authToken is null.');
+      return;
+    }
+    
+    final response = await _api.addLeaderboardEntry(_authService.authToken!, _currentQuiz!.id, entry.toJson());
+    if (response['success']) {
       _currentQuiz!.leaderboard.add(entry);
       _currentQuiz!.leaderboard.sort((a, b) => b.score.compareTo(a.score));
-      _saveQuizzes();
-
-      // Add quiz answer notification to the inbox
+      
       _userQuestionService.addQuizAnswerNotification(
         quizOwnerUsername: quizOwnerUsername,
         quizTakerUsername: entry.username,
@@ -276,34 +337,33 @@ class QuizProvider with ChangeNotifier {
         score: entry.score,
         totalQuestions: _currentQuiz!.questions.length,
       );
-
       notifyListeners();
+    } else {
+      debugPrint('QuizProvider: API error adding leaderboard entry: ${response['message']}');
     }
   }
 
-  void removeLeaderboardEntry(String quizId, int entryIndex) {
+  Future<void> removeLeaderboardEntry(String quizId, int entryIndex) async {
+    if (_authService.authToken == null) {
+      debugPrint('QuizProvider: Cannot remove leaderboard entry - Auth token is null.');
+      return;
+    }
+
     final quiz = _userQuizzes.firstWhere((q) => q.id == quizId);
     if (entryIndex >= 0 && entryIndex < quiz.leaderboard.length) {
       quiz.leaderboard.removeAt(entryIndex);
-      _saveQuizzes();
+      final response = await _api.updateQuiz(_authService.authToken!, quiz.id, quiz.toJson());
+      if (!response['success']) {
+        debugPrint('QuizProvider: Error updating quiz after removing leaderboard entry: ${response['message']}');
+      }
       notifyListeners();
     }
-  }
-
-  void removeQuiz(String quizId) {
-    _userQuizzes.removeWhere((quiz) => quiz.id == quizId);
-    if (_currentQuiz?.id == quizId) {
-      _currentQuiz = null; // Clear current quiz if it was the one deleted
-    }
-    _saveQuizzes();
-    notifyListeners();
   }
 
   void setSelectedQuizTheme(String themeName) {
     if (_currentQuiz != null) {
       _currentQuiz!.selectedThemeName = themeName;
-      _saveQuizzes();
-      notifyListeners();
+      _updateQuizOnBackend();
     }
   }
 

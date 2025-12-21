@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 
 class PostSubmitPage extends StatefulWidget {
   final String username;
+  final bool isAnonymous; // NEW: Flag to control the message
 
-  const PostSubmitPage({super.key, required this.username});
+  const PostSubmitPage({
+    super.key,
+    required this.username,
+    this.isAnonymous = true, // Default to true for backward compatibility
+  });
 
   @override
   State<PostSubmitPage> createState() => _PostSubmitPageState();
@@ -19,7 +24,6 @@ class _PostSubmitPageState extends State<PostSubmitPage> with TickerProviderStat
   void initState() {
     super.initState();
 
-    // Fade animation for the whole page content
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
@@ -30,7 +34,6 @@ class _PostSubmitPageState extends State<PostSubmitPage> with TickerProviderStat
     );
     _fadeController.forward();
 
-    // Bounce animation for the checkmark icon
     _iconBounceController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
@@ -38,10 +41,10 @@ class _PostSubmitPageState extends State<PostSubmitPage> with TickerProviderStat
     _iconBounceAnimation = Tween<double>(begin: 0.8, end: 1.1).animate(
       CurvedAnimation(
         parent: _iconBounceController,
-        curve: Curves.elasticOut, // A nice bouncy curve
+        curve: Curves.elasticOut,
       ),
     );
-    _iconBounceController.forward(); // Play the animation once
+    _iconBounceController.forward();
   }
 
   @override
@@ -54,10 +57,17 @@ class _PostSubmitPageState extends State<PostSubmitPage> with TickerProviderStat
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    // MODIFIED: Dynamically set the title and message
+    final String titleText = widget.isAnonymous ? 'Question Sent!' : 'Reply Sent!';
+    final String messageText = widget.isAnonymous
+        ? 'Your anonymous question has been sent to @${widget.username}!'
+        : 'Your reply has been sent to @${widget.username}!';
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Question Sent!'),
-        automaticallyImplyLeading: false, // Hide back button
+        title: Text(titleText),
+        automaticallyImplyLeading: false,
         backgroundColor: theme.appBarTheme.backgroundColor,
         foregroundColor: theme.appBarTheme.foregroundColor,
         titleTextStyle: theme.appBarTheme.titleTextStyle,
@@ -87,7 +97,7 @@ class _PostSubmitPageState extends State<PostSubmitPage> with TickerProviderStat
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Your anonymous question has been sent to @${widget.username}!',
+                    messageText, // Use the dynamic message
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
@@ -96,7 +106,6 @@ class _PostSubmitPageState extends State<PostSubmitPage> with TickerProviderStat
                   const SizedBox(height: 48),
                   ElevatedButton(
                     onPressed: () {
-                      // Navigate to the landing page to create their own link
                       Navigator.of(context).pushNamedAndRemoveUntil(
                         '/',
                         (route) => false,
@@ -107,7 +116,6 @@ class _PostSubmitPageState extends State<PostSubmitPage> with TickerProviderStat
                   const SizedBox(height: 24),
                   TextButton(
                     onPressed: () {
-                      // Go back to the profile page to ask another question
                       Navigator.of(context).pop();
                     },
                     child: const Text('Ask another question'),

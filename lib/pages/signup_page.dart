@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
-import 'package:mystrio/pages/main_tab_page.dart'; // Import MainTabPage
+import 'package:mystrio/pages/main_tab_page.dart';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -14,8 +14,16 @@ class SignUpPage extends StatefulWidget {
 class _SignUpPageState extends State<SignUpPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _usernameController = TextEditingController(); // NEW: Controller for username input
   bool _isLoading = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill username if already set (e.g., from initial setup)
+    _usernameController.text = Provider.of<AuthService>(context, listen: false).username ?? '';
+  }
 
   Future<void> _signUp() async {
     setState(() {
@@ -24,6 +32,12 @@ class _SignUpPageState extends State<SignUpPage> {
     });
 
     final authService = Provider.of<AuthService>(context, listen: false);
+    final originalUsernameAttempt = _usernameController.text; // Capture user's input
+
+    // First, update the username in AuthService with the user's input
+    // This is crucial because signUpWithEmail uses authService.username
+    await authService.setUsername(originalUsernameAttempt);
+
     final error = await authService.signUpWithEmail(
       _emailController.text,
       _passwordController.text,
@@ -36,6 +50,18 @@ class _SignUpPageState extends State<SignUpPage> {
       });
 
       if (error == null) {
+        // Check if the username was modified by the backend
+        if (authService.username != originalUsernameAttempt) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Your username was adjusted to @${authService.username} for uniqueness.',
+              ),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+
         // Successfully signed up, navigate to MainTabPage
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const MainTabPage()),
@@ -67,6 +93,15 @@ class _SignUpPageState extends State<SignUpPage> {
                   style: theme.textTheme.titleMedium,
                 ),
                 const SizedBox(height: 32),
+                // NEW: Username field
+                TextField(
+                  controller: _usernameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Username',
+                  ),
+                  keyboardType: TextInputType.text,
+                ),
+                const SizedBox(height: 16),
                 TextField(
                   controller: _emailController,
                   decoration: const InputDecoration(

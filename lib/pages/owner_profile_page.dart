@@ -5,6 +5,7 @@ import 'package:mystrio/services/theme_service.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
 import 'package:mystrio/pages/login_page.dart'; // Import LoginPage
 import 'package:mystrio/pages/initial_page.dart'; // Import InitialPage for logout navigation
+import 'package:flutter/services.dart'; // NEW: For Clipboard
 
 class OwnerProfilePage extends StatelessWidget {
   const OwnerProfilePage({super.key});
@@ -46,6 +47,10 @@ class OwnerProfilePage extends StatelessWidget {
     final themeService = Provider.of<ThemeService>(context);
 
     final String displayUsername = authService.username ?? 'MystrioUser';
+    // NEW: Generate the anonymous question link
+    final String anonymousQuestionLink = authService.username != null
+        ? 'https://mystrio.top/profile/@${authService.username}/ask'
+        : 'Login to get your anonymous question link.';
 
     return Scaffold(
       appBar: CustomAppBar(
@@ -88,6 +93,40 @@ class OwnerProfilePage extends StatelessWidget {
                 ),
               ),
             ),
+
+            // NEW: Anonymous Question Link Section
+            if (authService.hasPermanentAccount) // Only show if logged in
+              Card(
+                margin: const EdgeInsets.only(bottom: 16),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your Anonymous Question Link:',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText( // Allows user to select and copy text
+                        anonymousQuestionLink,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: Colors.blue),
+                      ),
+                      const SizedBox(height: 8),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          await Clipboard.setData(ClipboardData(text: anonymousQuestionLink));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Link copied to clipboard!')),
+                          );
+                        },
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Copy Link'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
             // Theme Settings
             Card(

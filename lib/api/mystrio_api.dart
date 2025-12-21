@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:mystrio/models/question.dart'; // Import the shared Question model
+import 'package:mystrio/models/question.dart';
+import 'package:http_parser/http_parser.dart'; // NEW: For multipart file content type
+import 'package:flutter/foundation.dart'; // Import for debugPrint
 
 class MystrioApi {
-  final String _baseUrl = 'https://api.mystrio.top'; // Your API base URL
+  final String _baseUrl = 'https://api.mystrio.top';
 
-  // Helper to get headers, including Authorization if token is provided
   Map<String, String> _getHeaders(String? authToken) {
     final headers = {'Content-Type': 'application/json'};
     if (authToken != null) {
@@ -14,8 +15,8 @@ class MystrioApi {
     return headers;
   }
 
-  // --- NEW: Generic HTTP Methods ---
-
+  // --- Generic HTTP Methods ---
+  // (get, post, put, delete methods remain the same)
   Future<http.Response> get(String endpoint, {String? token}) async {
     final url = Uri.parse('$_baseUrl/api$endpoint');
     return await http.get(url, headers: _getHeaders(token));
@@ -36,10 +37,8 @@ class MystrioApi {
     return await http.delete(url, headers: _getHeaders(token));
   }
 
-
-  // --- Specific Methods (can be refactored to use generic methods later) ---
-
-  // Method for user registration
+  // --- User & Auth Methods ---
+  // (register, login, getUserIdByUsername, updateUserProfile remain the same)
   Future<Map<String, dynamic>> register({
     required String email,
     required String password,
@@ -69,7 +68,6 @@ class MystrioApi {
     }
   }
 
-  // Method for user login
   Future<Map<String, dynamic>> login({
     required String email,
     required String password,
@@ -91,7 +89,16 @@ class MystrioApi {
     }
   }
 
-  // Method to update user profile fields
+  Future<Map<String, dynamic>> getUserIdByUsername(String username) async {
+    final url = Uri.parse('$_baseUrl/api/users/by-username/$username');
+    try {
+      final response = await http.get(url, headers: _getHeaders(null));
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
   Future<Map<String, dynamic>> updateUserProfile({
     required int userId,
     required String authToken,
@@ -120,7 +127,30 @@ class MystrioApi {
     }
   }
 
-  // Method to get questions for the logged-in user
+  // NEW: Method to upload a profile image
+  Future<Map<String, dynamic>> uploadProfileImage(String authToken, String imagePath) async {
+    final url = Uri.parse('$_baseUrl/api/users/profile-image');
+    try {
+      var request = http.MultipartRequest('POST', url);
+      request.headers['Authorization'] = 'Bearer $authToken';
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'profileImage', // This 'field' name must match your backend's expectation
+          imagePath,
+          contentType: MediaType('image', 'jpeg'), // Or 'png', etc.
+        ),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error during image upload: $e'};
+    }
+  }
+
+  // --- Styled Question Methods ---
+  // (getQuestions, postQuestion, postAnswer remain the same)
   Future<Map<String, dynamic>> getQuestions({
     required String authToken,
   }) async {
@@ -132,7 +162,6 @@ class MystrioApi {
     }
   }
 
-  // Method to post a new question for the logged-in user
   Future<Map<String, dynamic>> postQuestion({
     required String questionText,
     required bool isFromAI,
@@ -151,7 +180,6 @@ class MystrioApi {
     }
   }
 
-  // Method to post an answer to a question (updates existing question)
   Future<Map<String, dynamic>> postAnswer({
     required String questionId,
     required String answerText,
@@ -167,12 +195,68 @@ class MystrioApi {
     }
   }
 
-  // Generic method to handle API responses
+  // --- Quiz Methods ---
+  // (getQuizzes, createQuiz, updateQuiz, deleteQuiz remain the same)
+  Future<Map<String, dynamic>> getQuizzes(String authToken) async {
+    try {
+      final response = await get('/quizzes', token: authToken);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> createQuiz(String authToken, Map<String, dynamic> quizData) async {
+    try {
+      final response = await post('/quizzes', token: authToken, body: quizData);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateQuiz(String authToken, String quizId, Map<String, dynamic> quizData) async {
+    try {
+      final response = await put('/quizzes/$quizId', token: authToken, body: quizData);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteQuiz(String authToken, String quizId) async {
+    try {
+      final response = await delete('/quizzes/$quizId', token: authToken);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  // --- Leaderboard Methods ---
+  // (getLeaderboard, addLeaderboardEntry remain the same)
+  Future<Map<String, dynamic>> getLeaderboard(String quizId) async {
+    try {
+      final response = await get('/quizzes/$quizId/leaderboard');
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> addLeaderboardEntry(String authToken, String quizId, Map<String, dynamic> entryData) async {
+    try {
+      final response = await post('/quizzes/$quizId/leaderboard', token: authToken, body: entryData);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  // --- Generic Response Handler ---
   Map<String, dynamic> _handleResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      // Success
       try {
-        // Handle cases where the body might be empty (e.g., 204 No Content)
         if (response.body.isEmpty) {
           return {'success': true, 'data': null};
         }
@@ -181,15 +265,17 @@ class MystrioApi {
         return {'success': false, 'message': 'Failed to parse server response.'};
       }
     } else {
-      // Error
+      debugPrint('API Error: Raw response body: ${response.body}'); // Log raw response
       String errorMessage = 'An unknown error occurred.';
+      String? errorDetails;
       try {
         final errorData = json.decode(response.body);
-        errorMessage = errorData['error'] ?? 'Server error: ${response.statusCode}';
+        errorMessage = errorData['message'] ?? 'Server error: ${response.statusCode}';
+        errorDetails = errorData['error'];
       } catch (e) {
         errorMessage = 'Server error: ${response.statusCode}';
       }
-      return {'success': false, 'message': errorMessage};
+      return {'success': false, 'message': errorMessage, 'error': errorDetails};
     }
   }
 }

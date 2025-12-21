@@ -1,228 +1,270 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/quiz_provider.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
-import 'package:share_plus/share_plus.dart'; // Import share_plus
-import 'package:mystrio/pages/main_tab_page.dart'; // Import MainTabPage
+import 'package:share_plus/share_plus.dart';
+import 'package:screenshot/screenshot.dart';
+import 'package:path_provider/path_provider.dart';
 
 class QuizResultsPage extends StatelessWidget {
   final String quizId;
+  final ScreenshotController _screenshotController = ScreenshotController();
 
-  const QuizResultsPage({super.key, required this.quizId});
+  QuizResultsPage({super.key, required this.quizId});
+
+  Future<void> _shareQuizWithImage(BuildContext context, Quiz quiz, String shareLink) async {
+    final Uint8List? imageBytes = await _screenshotController.capture();
+
+    if (imageBytes != null) {
+      final shareText =
+          'I just created a quiz on Mystrio! Can you beat my score?\n\n"${quiz.name}"\n\nPlay it here: $shareLink';
+
+      final imageFile = XFile.fromData(
+        imageBytes,
+        name: 'quiz_card.png',
+        mimeType: 'image/png',
+      );
+
+      if (kIsWeb) {
+        await Share.shareXFiles(
+          [imageFile],
+          text: shareText,
+          subject: 'Check out my new quiz!',
+        );
+      } else {
+        final directory = await getTemporaryDirectory();
+        final imagePath = '${directory.path}/quiz_card.png';
+        await File(imagePath).writeAsBytes(imageBytes);
+
+        await Share.shareXFiles(
+          [XFile(imagePath)],
+          text: shareText,
+          subject: 'Check out my new quiz!',
+        );
+      }
+    } else {
+      final shareText =
+          'I just created a quiz on Mystrio! Can you beat my score?\n\n"${quiz.name}"\n\nPlay it here: $shareLink';
+      Share.share(shareText, subject: 'Check out my new quiz!');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    print('DEBUG: QuizResultsPage received quizId: $quizId'); // Debug print
     final quizProvider = Provider.of<QuizProvider>(context);
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final theme = Theme.of(context);
 
-    final quiz = quizProvider.userQuizzes.firstWhere(
-      (q) => q.id == quizId,
-      orElse: () => Quiz(
-        id: 'error',
-        name: 'Error Quiz',
-        selectedThemeName: 'Friendship',
-        questions: [],
-        leaderboard: [],
-      ),
-    );
-
-    if (quiz.id == 'error') {
-      return Scaffold(
-        appBar: const CustomAppBar(title: 'Error'),
-        body: Center(
-          child: Text(
-            'Quiz not found. It might have been deleted or never created.',
-            style: Theme.of(context).textTheme.headlineSmall,
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
+    Quiz? quiz;
+    try {
+      quiz = quizProvider.userQuizzes.firstWhere((q) => q.id == quizId);
+    } catch (e) {
+      quiz = null;
     }
 
-    final shareLink = 'https://mystrio.app/quiz/$quizId';
+    if (quiz == null) {
+      return Scaffold(
+        appBar: const CustomAppBar(title: 'Error'),
+        body: const Center(child: Text('Quiz not found. Please go back and try again.')),
+      );
+    }
+    
+    // Create a final, non-nullable variable after the null check.
+    final finalQuiz = quiz;
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: CustomAppBar(
-          title: 'Results',
-          backgroundColor: Colors.white,
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Share'),
-              Tab(text: 'Scoreboard'),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _buildShareTab(context, quiz, shareLink),
-            _buildScoreboardTab(context, quiz, quizProvider),
-          ],
-        ),
-      ),
+    final quizTheme = quizProvider.themes.firstWhere(
+      (t) => t.name == finalQuiz.selectedThemeName,
+      orElse: () => quizProvider.themes.first,
     );
-  }
 
-  Widget _buildShareTab(BuildContext context, Quiz quiz, String shareLink) {
-    final theme = Theme.of(context);
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    final shareLink = 'https://mystrio.app/play?quizId=${finalQuiz.id}';
+
+    return Scaffold(
+      appBar: const CustomAppBar(title: 'Results & Share'),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _shareQuizWithImage(context, finalQuiz, shareLink),
+        label: const Text('Share Quiz'),
+        icon: const Icon(Icons.share),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16.0),
         children: [
-          const SizedBox(height: 20),
+          Screenshot(
+            controller: _screenshotController,
+            child: _buildShareCard(
+              context,
+              finalQuiz,
+              quizTheme,
+              theme,
+              authService.profileImagePath,
+            ),
+          ),
+          const SizedBox(height: 24),
           Text(
-            quiz.name,
+            'Leaderboard',
             style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 10),
-          Text(
-            'Congrats, your quiz is ready!',
-            style: theme.textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 30),
-          Card(
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Text(shareLink),
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: shareLink));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Link copied to clipboard!')),
-                      );
-                    },
-                    icon: const Icon(Icons.copy),
-                    label: const Text('Copy Link'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 30),
-          Card(
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Text('Share on Socials', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 20),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildSocialIcon(context, Icons.message, 'WhatsApp', shareLink),
-                        _buildSocialIcon(context, Icons.camera_alt, 'Instagram', shareLink),
-                        _buildSocialIcon(context, Icons.snapchat, 'Snapchat', shareLink),
-                        _buildSocialIcon(context, Icons.messenger, 'Messenger', shareLink),
-                        _buildSocialIcon(context, Icons.close, 'X', shareLink),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 30), // Spacing below social sharing
-          ElevatedButton.icon(
-            onPressed: () {
-              // Navigate back to the MainTabPage and remove all other routes
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const MainTabPage()),
-                (route) => false,
-              );
-            },
-            icon: const Icon(Icons.home),
-            label: const Text('Back to Home'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: theme.colorScheme.primary,
-              foregroundColor: theme.colorScheme.onPrimary,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              textStyle: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
+          const SizedBox(height: 16),
+          finalQuiz.leaderboard.isEmpty
+              ? _buildEmptyLeaderboard(theme)
+              : _buildLeaderboard(finalQuiz.leaderboard, theme),
         ],
       ),
     );
   }
 
-  Widget _buildScoreboardTab(BuildContext context, Quiz quiz, QuizProvider quizProvider) {
-    final theme = Theme.of(context);
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Who Knows You Best?',
-            style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
+  Widget _buildShareCard(
+    BuildContext context,
+    Quiz quiz,
+    QuizTheme quizTheme,
+    ThemeData theme,
+    String? profileImagePath,
+  ) {
+    return Card(
+      elevation: 8,
+      shadowColor: Colors.black.withOpacity(0.2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: quizTheme.gradientColors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: quiz.leaderboard.isEmpty
-                ? Center(
-                    child: Text(
-                      'No one has taken this quiz yet!',
-                      style: theme.textTheme.titleMedium,
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: quiz.leaderboard.length,
-                    itemBuilder: (context, index) {
-                      final entry = quiz.leaderboard[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: ListTile(
-                          leading: Text(
-                            '#${index + 1}',
-                            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          title: Text(entry.username),
-                          subtitle: Text('${entry.score} Points'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              quizProvider.removeLeaderboardEntry(quiz.id, index);
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSocialIcon(BuildContext context, IconData icon, String label, String shareLink) {
-    return GestureDetector(
-      onTap: () {
-        Share.share('Check out my quiz: $shareLink');
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+        ),
         child: Column(
           children: [
-            Icon(icon, size: 40),
+            CircleAvatar(
+              radius: 40,
+              backgroundColor: Colors.white.withOpacity(0.8),
+              backgroundImage: (profileImagePath != null && profileImagePath.isNotEmpty)
+                  ? NetworkImage(profileImagePath)
+                  : null,
+              child: (profileImagePath == null || profileImagePath.isEmpty)
+                  ? const Icon(Icons.person, size: 40, color: Colors.grey)
+                  : null,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              quiz.name,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                shadows: [const Shadow(blurRadius: 3, color: Colors.black38)],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '${quiz.questions.length} Questions',
+              style: theme.textTheme.bodyLarge?.copyWith(color: Colors.white.withOpacity(0.8)),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Click the link to play!',
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+            ),
             const SizedBox(height: 8),
-            Text(label),
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.arrow_downward, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Icon(Icons.arrow_downward, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Icon(Icons.arrow_downward, color: Colors.white, size: 20),
+              ],
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildEmptyLeaderboard(ThemeData theme) {
+    return Card(
+      color: Colors.grey.shade100,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          children: [
+            Icon(Icons.people_outline, size: 48, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            Text(
+              'No one has taken this quiz yet.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Share it and see who gets the high score!',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLeaderboard(List<LeaderboardEntry> leaderboard, ThemeData theme) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: leaderboard.asMap().entries.map((entry) {
+          int index = entry.key;
+          LeaderboardEntry item = entry.value;
+          return ListTile(
+            leading: _buildRankIcon(index),
+            title: Text(item.username, style: const TextStyle(fontWeight: FontWeight.bold)),
+            trailing: Text(
+              '${item.score}',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildRankIcon(int index) {
+    IconData icon;
+    Color color;
+    switch (index) {
+      case 0:
+        icon = Icons.emoji_events;
+        color = Colors.amber;
+        break;
+      case 1:
+        icon = Icons.emoji_events;
+        color = Colors.grey.shade400;
+        break;
+      case 2:
+        icon = Icons.emoji_events;
+        color = const Color(0xFFCD7F32); // Bronze
+        break;
+      default:
+        return CircleAvatar(
+          radius: 18,
+          backgroundColor: Colors.grey.shade200,
+          child: Text(
+            '${index + 1}',
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54),
+          ),
+        );
+    }
+    return Icon(icon, color: color, size: 36);
   }
 }
