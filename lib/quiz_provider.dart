@@ -155,23 +155,11 @@ class QuizProvider with ChangeNotifier {
 
     final response = await _api.getQuizzes(_authService.authToken!);
     if (response['success']) {
-      var data = response['data'];
-      debugPrint('QuizProvider: fetchQuizzes response data type: ${data.runtimeType}');
-      debugPrint('QuizProvider: fetchQuizzes response data: $data');
-
-      // Handle double wrapping: {success: true, data: {success: true, data: [...]}}
-      if (data is Map && data.containsKey('data')) {
-         data = data['data'];
-      }
-
+      final data = response['data'];
       if (data is List) {
         _userQuizzes = data.map((json) => Quiz.fromJson(json)).toList();
-      } else if (data is Map && data.containsKey('quizzes') && data['quizzes'] is List) {
-        // Handle case where list is wrapped in an object like {quizzes: [...]}
-        final quizzesList = data['quizzes'] as List;
-        _userQuizzes = quizzesList.map((json) => Quiz.fromJson(json)).toList();
       } else {
-         debugPrint('QuizProvider: Error fetching quizzes: response data is not a list or recognized format.');
+        debugPrint('QuizProvider: Error fetching quizzes: response data is not a list.');
         _userQuizzes = [];
       }
     } else {
@@ -213,16 +201,11 @@ class QuizProvider with ChangeNotifier {
 
     final response = await _api.createQuiz(_authService.authToken!, newQuizData);
     if (response['success']) {
-      // Handle potential double wrapping in create response as well
-      var responseData = response['data'];
-      if (responseData is Map && responseData.containsKey('data')) {
-        responseData = responseData['data'];
-      }
+      final responseData = response['data'];
+      final quizId = responseData['quizId'] ?? responseData['id'];
 
-      final quizId = responseData['quizId'] ?? responseData['id']; // Handle both potential ID fields
-      
       if (quizId != null) {
-         final newQuiz = Quiz(
+        final newQuiz = Quiz(
           id: quizId.toString(),
           name: name,
           description: newQuizData['description'] as String?, // use the generated description
