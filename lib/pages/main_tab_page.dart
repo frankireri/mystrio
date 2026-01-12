@@ -7,6 +7,7 @@ import 'package:mystrio/auth_service.dart';
 import 'package:mystrio/pages/login_page.dart';
 import 'package:mystrio/question_provider.dart';
 import 'package:mystrio/quiz_provider.dart';
+import 'package:mystrio/inbox_provider.dart';
 
 class MainTabPage extends StatefulWidget {
   final int initialIndex;
@@ -141,13 +142,29 @@ class _MainTabPageState extends State<MainTabPage> {
         children: _pages,
       ),
       bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
+        items: <BottomNavigationBarItem>[
           BottomNavigationBarItem(
-            icon: Icon(Icons.inbox_outlined),
-            activeIcon: Icon(Icons.inbox),
+            icon: Consumer<InboxProvider>(
+              builder: (context, inboxProvider, child) {
+                return Badge(
+                  isLabelVisible: inboxProvider.unseenItemCount > 0,
+                  label: Text(inboxProvider.unseenItemCount.toString()),
+                  child: const Icon(Icons.inbox_outlined),
+                );
+              },
+            ),
+            activeIcon: Consumer<InboxProvider>(
+              builder: (context, inboxProvider, child) {
+                return Badge(
+                  isLabelVisible: inboxProvider.unseenItemCount > 0,
+                  label: Text(inboxProvider.unseenItemCount.toString()),
+                  child: const Icon(Icons.inbox),
+                );
+              },
+            ),
             label: 'Inbox',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.add_circle_outline),
             activeIcon: Icon(Icons.add_circle),
             label: 'Create',

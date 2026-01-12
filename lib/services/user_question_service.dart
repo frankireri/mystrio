@@ -237,27 +237,17 @@ class UserQuestionService with ChangeNotifier {
   Future<bool> postAnswerToAnonymousQuestion({
     required int questionId,
     required String answerText,
-    String? styleId, // NEW: Added optional styleId
   }) async {
-    debugPrint('UserQuestionService: Attempting to post answer for questionId: $questionId with styleId: $styleId');
+    debugPrint('UserQuestionService: Attempting to post answer for questionId: $questionId');
     if (_authService?.authToken == null) {
       debugPrint('UserQuestionService: No auth token available. Cannot post answer.');
       return false;
     }
     try {
-      // NEW: Construct body with optional styleId
-      final Map<String, dynamic> body = {
-        'questionId': questionId,
-        'answerText': answerText,
-      };
-      if (styleId != null) {
-        body['styleId'] = styleId;
-      }
-
       final response = await _api.post(
         '/questions/answer',
         token: _authService!.authToken,
-        body: body,
+        body: {'questionId': questionId, 'answerText': answerText},
       );
       debugPrint('UserQuestionService: API call to /questions/answer finished.');
       debugPrint('UserQuestionService: Status Code: ${response.statusCode}');

@@ -1,15 +1,9 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mystrio/services/user_question_service.dart';
 import 'package:mystrio/widgets/custom_app_bar.dart';
-import 'package:mystrio/services/question_style_service.dart';
-import 'package:screenshot/screenshot.dart';
-import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:share_plus/share_plus.dart';
 
-// NEW: This page is now a visual "Answer Studio" for creating and sharing stylish answers.
+// MODIFIED: This page now handles answering anonymous questions from the inbox.
 class AnswerPage extends StatefulWidget {
   final int questionId;
   final String questionText;
@@ -24,42 +18,45 @@ class AnswerPage extends StatefulWidget {
   State<AnswerPage> createState() => _AnswerPageState();
 }
 
-class _AnswerPageState extends State<AnswerPage> {
+class _AnswerPageState extends State<AnswerPage> with TickerProviderStateMixin {
   final TextEditingController _answerController = TextEditingController();
-  final ScreenshotController _screenshotController = ScreenshotController();
-  bool _isSubmitting = false;
+  bool _isSubmitting = false; // To prevent multiple submissions
 
-  late QuestionStyle _currentStyle;
-  final _random = Random();
+  int _characterCount = 0;
+  static const int _maxCharacters = 280; // Increased character limit
 
   @override
   void initState() {
     super.initState();
-    // Start with a random style
-    _changeStyle();
+    _answerController.addListener(_updateCharacterCount);
   }
 
-  void _changeStyle() {
-    final styleService = Provider.of<QuestionStyleService>(context, listen: false);
-    final allStyles = styleService.allStyles;
+  void _updateCharacterCount() {
     setState(() {
-      _currentStyle = allStyles[_random.nextInt(allStyles.length)];
+      _characterCount = _answerController.text.length;
     });
   }
 
   @override
   void dispose() {
+    _answerController.removeListener(_updateCharacterCount);
     _answerController.dispose();
     super.dispose();
   }
 
-// FULLY IMPLEMENTED: The submit and share logic is now complete.
-  Future<void> _submitAndShare() async {
+  // MODIFIED: Submits the answer using UserQuestionService
+  Future<void> _submitAnswer() async {
     if (_isSubmitting) return;
 
-    if (_answerController.text.trim().isEmpty) {
+    if (_answerController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please type an answer before sharing.')),
+        const SnackBar(content: Text('Please type an answer.')),
+      );
+      return;
+    }
+    if (_characterCount > _maxCharacters) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your answer is too long.')),
       );
       return;
     }
@@ -68,191 +65,138 @@ class _AnswerPageState extends State<AnswerPage> {
       _isSubmitting = true;
     });
 
-    try {
-      // 1. Capture the image from the Screenshot controller
-      final Uint8List? imageBytes = await _screenshotController.capture();
-      if (imageBytes == null) {
-        throw Exception('Could not capture image.');
-      }
+    final success = await Provider.of<UserQuestionService>(context, listen: false)
+        .postAnswerToAnonymousQuestion(
+      questionId: widget.questionId,
+      answerText: _answerController.text,
+    );
 
-      // 2. Use ShareXFiles to share the image
-      final shareText = 'See my answer on Mystrio!';
-      final imageFile = XFile.fromData(
-        imageBytes,
-        name: 'mystrio_answer.png',
-        mimeType: 'image/png',
-      );
-
-      // The share result tells us if the user successfully shared.
-      final shareResult = await Share.shareXFiles(
-        [imageFile],
-        text: shareText,
-        subject: 'My Answer',
-      );
-
-      // 3. Only post the answer if the share was successful
-      if (shareResult.status == ShareResultStatus.success) {
-        final success = await Provider.of<UserQuestionService>(context, listen: false)
-            .postAnswerToAnonymousQuestion(
-          questionId: widget.questionId,
-          answerText: _answerController.text,
-          styleId: _currentStyle.id, // Pass the styleId
-        );
-
-        if (mounted) {
-          if (success) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Your answer has been posted!')),
-            );
-            Navigator.of(context).pop(); // Go back to the inbox
-          } else {
-            throw Exception('Failed to post answer.');
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
+    if (mounted) {
+      if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('An error occurred: ${e.toString()}')),
+          const SnackBar(content: Text('Your answer has been posted!')),
+        );
+        Navigator.of(context).pop(); // Go back to the inbox
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to post answer. Please try again.')),
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
+      setState(() {
+        _isSubmitting = false;
+      });
     }
+  }
+
+  // NOTE: Sharing is temporarily disabled for this flow.
+  // The previous implementation depended on a different data model.
+  Future<void> _shareAnswer() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('You can share your answer after posting it! (Coming Soon)')),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final viewPadding = MediaQuery.of(context).viewPadding;
-
     return Scaffold(
-      backgroundColor: Colors.black, // Dark background for contrast
-      // Using a custom app bar to better fit the "studio" feel
-      appBar: AppBar(
-        title: const Text('Create Answer', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+      appBar: CustomAppBar(
+        title: 'Answer Question',
+        // Sharing is disabled for now.
+        // actions: [
+        //   IconButton(
+        //     icon: Icon(Icons.share, color: theme.colorScheme.onSurface),
+        //     onPressed: _shareAnswer,
+        //   ),
+        // ],
       ),
-      body: SafeArea(
-        top: false,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: Center(
-                // The main interactive card for the answer
-                child: _buildAnswerCard(),
+            // Display the question
+            Card(
+              elevation: 0,
+              color: theme.colorScheme.surfaceVariant.withOpacity(0.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Anonymous Question:',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.questionText, // Use questionText from the widget
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            // Bottom control panel
-            _buildControlPanel(theme),
+            const SizedBox(height: 24),
+            // Input field for the answer
+            Card(
+              elevation: 2,
+              shadowColor: Colors.black.withOpacity(0.1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    TextField(
+                      controller: _answerController,
+                      decoration: const InputDecoration(
+                        hintText: 'Type your public answer here...',
+                        border: InputBorder.none,
+                      ),
+                      maxLines: 8,
+                      maxLength: _maxCharacters,
+                      keyboardType: TextInputType.multiline,
+                      buildCounter: (context, {required currentLength, required isFocused, maxLength}) {
+                        // This builds the character counter inside the TextField decoration
+                        return Text(
+                          '$currentLength/$maxLength',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: currentLength > _maxCharacters
+                                ? theme.colorScheme.error
+                                : theme.colorScheme.onSurface.withOpacity(0.6),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Submit button
+            ElevatedButton(
+              onPressed: _isSubmitting ? null : _submitAnswer,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: _isSubmitting
+                  ? const SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+                    )
+                  : const Text('Post Answer Publicly'),
+            ),
           ],
         ),
-      ),
-    );
-  }
-
-  // The visual card that the user interacts with and will eventually share.
-  Widget _buildAnswerCard() {
-    return Screenshot(
-      controller: _screenshotController,
-      child: AspectRatio(
-        aspectRatio: 9 / 16, // Common story aspect ratio
-        child: Container(
-          padding: const EdgeInsets.all(24.0),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: _currentStyle.gradientColors,
-              begin: _currentStyle.begin,
-              end: _currentStyle.end,
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Question text
-              Text(
-                widget.questionText,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: _currentStyle.fontFamily,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white.withOpacity(0.8),
-                  shadows: [const Shadow(blurRadius: 2, color: Colors.black26)],
-                ),
-              ),
-              const SizedBox(height: 20),
-              // Answer input field
-              TextField(
-                controller: _answerController,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: _currentStyle.fontFamily,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  shadows: [const Shadow(blurRadius: 3, color: Colors.black38)],
-                ),
-                maxLines: 5,
-                maxLength: 150,
-                decoration: InputDecoration(
-                  hintText: 'Type your answer...',
-                  hintStyle: TextStyle(
-                    fontFamily: _currentStyle.fontFamily,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white.withOpacity(0.5),
-                  ),
-                  border: InputBorder.none,
-                  counterText: '', // Hide the default counter
-                ),
-                cursorColor: Colors.white,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // The bottom panel with the dice and share buttons.
-  Widget _buildControlPanel(ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // "Dice Roll" button to change the style
-          FloatingActionButton(
-            heroTag: 'dice_button',
-            onPressed: _changeStyle,
-            backgroundColor: Colors.grey.shade800,
-            child: const Icon(Icons.casino, color: Colors.white, size: 28),
-          ),
-          // Share button
-          FloatingActionButton.extended(
-            heroTag: 'share_button',
-            onPressed: _isSubmitting ? null : _submitAndShare,
-            backgroundColor: theme.primaryColor,
-            label: _isSubmitting
-                ? const SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
-                  )
-                : const Text('Share', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            icon: const Icon(Icons.share),
-          ),
-        ],
       ),
     );
   }
