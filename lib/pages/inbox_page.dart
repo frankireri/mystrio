@@ -12,16 +12,62 @@ import 'package:intl/intl.dart'; // Ensure you have intl in pubspec, or use basi
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mystrio/widgets/ad_banner.dart';
 
-class InboxPage extends StatelessWidget {
+class InboxPage extends StatefulWidget {
   const InboxPage({super.key});
+
+  @override
+  State<InboxPage> createState() => _InboxPageState();
+}
+
+class _InboxPageState extends State<InboxPage> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(_handleTabSelection);
+  }
+
+  void _handleTabSelection() {
+    if (_tabController.indexIsChanging) {
+      final inboxProvider = Provider.of<InboxProvider>(context, listen: false);
+      switch (_tabController.index) {
+        case 0:
+          inboxProvider.setFilter(InboxFilter.all);
+          break;
+        case 1:
+          inboxProvider.setFilter(InboxFilter.qa);
+          break;
+        case 2:
+          inboxProvider.setFilter(InboxFilter.quizzes);
+          break;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_handleTabSelection);
+    _tabController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: const CustomAppBar(
+      appBar: CustomAppBar(
         title: 'Inbox',
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'All'),
+            Tab(text: 'Q&A'),
+            Tab(text: 'Quizzes'),
+          ],
+        ),
       ),
       body: Consumer<InboxProvider>(
         builder: (context, inboxProvider, child) {
@@ -44,7 +90,9 @@ class InboxPage extends StatelessWidget {
             );
           }
 
-          if (inboxProvider.inboxItems.isEmpty) {
+          final inboxNotifications = inboxProvider.filteredInboxItems;
+
+          if (inboxNotifications.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -65,18 +113,20 @@ class InboxPage extends StatelessWidget {
             );
           }
 
-          final inboxNotifications = inboxProvider.inboxItems;
           return RefreshIndicator(
             onRefresh: () => inboxProvider.refresh(),
             child: ListView.separated(
               padding: const EdgeInsets.all(16.0),
-              itemCount: inboxNotifications.length + 1, // +1 for the ad
+              itemCount: inboxNotifications.length + (kIsWeb ? 1 : 0),
               separatorBuilder: (context, index) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 if (kIsWeb && index == 0) {
                   return const WebAdBanner(adSlotId: 'YOUR_AD_SLOT_ID');
                 }
                 final itemIndex = kIsWeb ? index - 1 : index;
+                if (itemIndex < 0 || itemIndex >= inboxNotifications.length) {
+                  return const SizedBox.shrink();
+                }
                 final item = inboxNotifications[itemIndex];
                 return _buildNGLStyleCard(context, item, theme, inboxProvider);
               },
@@ -193,7 +243,11 @@ class InboxPage extends StatelessWidget {
         }
         
         onTap = () {
-          inboxProvider.markItemAsSeen(item.id);
+          if (item.id.startsWith('grouped-')) {
+            inboxProvider.markQuizGroupAsSeen(item.quizId!);
+          } else {
+            inboxProvider.markItemAsSeen(item.id);
+          }
           if (item.quizId != null) {
             Navigator.push(
               context,
@@ -299,8 +353,67 @@ class InboxPage extends StatelessWidget {
                 ],
               ),
             ),
+            if (item.type == InboxItemType.anonymousQuestion && !item.isSentByMe)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: _buildPopupMenu(context, item, inboxProvider),
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildPopupMenu(BuildContext context, InboxItem item, InboxProvider inboxProvider) {
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        if (value == 'delete') {
+          _confirmDelete(context, item, inboxProvider);
+        }
+      },
+      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+        const PopupMenuItem<String>(
+          value: 'delete',
+          child: ListTile(
+            leading: Icon(Icons.delete_outline, color: Colors.red),
+            title: Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ),
+      ],
+      icon: const Icon(Icons.more_vert, color: Colors.white),
+    );
+  }
+
+  void _confirmDelete(BuildContext context, InboxItem item, InboxProvider inboxProvider) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Message'),
+        content: const Text('Are you sure you want to permanently delete this message?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              final success = await inboxProvider.deleteNotification(item.id);
+              if (success && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Message deleted.')),
+                );
+              } else if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Failed to delete message.')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }

@@ -260,7 +260,14 @@ class MystrioApi {
         if (response.body.isEmpty) {
           return {'success': true, 'data': null};
         }
-        return {'success': true, 'data': json.decode(response.body)};
+        var decoded = json.decode(response.body);
+
+        // Handle double-wrapped "data" fields for successful responses
+        if (decoded is Map<String, dynamic> && decoded['success'] == true && decoded.containsKey('data')) {
+          return {'success': true, 'data': decoded['data']};
+        }
+
+        return {'success': true, 'data': decoded};
       } catch (e) {
         return {'success': false, 'message': 'Failed to parse server response.'};
       }
